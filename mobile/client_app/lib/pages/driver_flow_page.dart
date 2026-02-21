@@ -58,18 +58,24 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
 
   LatLng? get _pickupPoint {
     final order = _activeOrder;
-    if (order?.pickupLatitude == null || order?.pickupLongitude == null) {
+    if (order == null || !_isPanelVisibleOrder(order)) {
       return null;
     }
-    return LatLng(order!.pickupLatitude!, order.pickupLongitude!);
+    if (order.pickupLatitude == null || order.pickupLongitude == null) {
+      return null;
+    }
+    return LatLng(order.pickupLatitude!, order.pickupLongitude!);
   }
 
   LatLng? get _dropoffPoint {
     final order = _activeOrder;
-    if (order?.dropoffLatitude == null || order?.dropoffLongitude == null) {
+    if (order == null || !_isPanelVisibleOrder(order)) {
       return null;
     }
-    return LatLng(order!.dropoffLatitude!, order.dropoffLongitude!);
+    if (order.dropoffLatitude == null || order.dropoffLongitude == null) {
+      return null;
+    }
+    return LatLng(order.dropoffLatitude!, order.dropoffLongitude!);
   }
 
   Future<void> _runWithLoader(Future<void> Function() action) async {
@@ -313,32 +319,34 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
     }
   }
 
-  bool _isTerminalOrder(BackendOrder order) {
-    return order.status == 'COMPLETED' || order.status == 'CANCELED';
+  bool _isPanelVisibleStatus(String status) {
+    return status == 'DRIVER_ASSIGNED' ||
+        status == 'DRIVER_ARRIVING' ||
+        status == 'IN_PROGRESS';
+  }
+
+  bool _isPanelVisibleOrder(BackendOrder order) {
+    return _isPanelVisibleStatus(order.status);
   }
 
   BackendOrder? _pickActiveOrder(List<BackendOrder> orders) {
     final current = _activeOrder;
-    if (current != null && !_isTerminalOrder(current)) {
+    if (current != null && _isPanelVisibleOrder(current)) {
       for (final order in orders) {
         if (order.id == current.id) {
-          return order;
+          return _isPanelVisibleOrder(order) ? order : null;
         }
       }
       return current;
     }
 
     for (final order in orders) {
-      if (!_isTerminalOrder(order)) {
+      if (_isPanelVisibleOrder(order)) {
         return order;
       }
     }
 
-    if (orders.isEmpty) {
-      return null;
-    }
-
-    return orders.first;
+    return null;
   }
 
   Future<void> _acceptRide() async {
@@ -366,9 +374,17 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
       final next = await widget.apiClient.updateOrderStatus(order.id, status);
       if (!mounted) return;
       setState(() {
-        _activeOrder = next;
+        _activeOrder = _isPanelVisibleOrder(next) ? next : null;
       });
     });
+  }
+
+  Future<void> _cancelActiveOrder() async {
+    final order = _activeOrder;
+    if (order == null || !order.canBeCanceled) return;
+
+    await _updateStatus('CANCELED');
+    await _refreshOrders(showLoader: false);
   }
 
   Widget _buildMapActionsOverlay(AppI18n i18n) {
@@ -417,6 +433,8 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
   Widget build(BuildContext context) {
     final i18n = AppI18n(widget.lang);
     final order = _activeOrder;
+    final panelOrder =
+        order != null && _isPanelVisibleOrder(order) ? order : null;
 
     return Scaffold(
       appBar: AppBar(
@@ -483,17 +501,17 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const SizedBox(height: 6),
-                    if (order == null)
+                    if (panelOrder == null)
                       Text(i18n.t('no_active_order'))
                     else ...[
-                      Text(i18n.t('order_id', {'id': order.id})),
+                      Text(i18n.t('order_id', {'id': panelOrder.id})),
                       const SizedBox(height: 4),
                       Text(
                         i18n.t(
                           'status',
                           {
-                            'value':
-                                localizedOrderStatus(widget.lang, order.status)
+                            'value': localizedOrderStatus(
+                                widget.lang, panelOrder.status)
                           },
                         ),
                       ),
@@ -501,7 +519,7 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
                       Text(
                         i18n.t(
                           'final_price_label',
-                          {'value': order.finalPrice.toStringAsFixed(0)},
+                          {'value': panelOrder.finalPrice.toStringAsFixed(0)},
                         ),
                       ),
                     ],
@@ -525,12 +543,18 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
                       ),
                     ],
                     const SizedBox(height: 12),
-                    _buildStatusAction(i18n, order),
-                    const SizedBox(height: 8),
-                    FilledButton.tonal(
-                      onPressed: _busy ? null : () => _refreshOrders(),
-                      child: Text(i18n.t('refresh_orders')),
-                    ),
+                    _buildStatusAction(i18n, panelOrder),
+                    if (panelOrder != null && panelOrder.canBeCanceled) ...[
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        onPressed: _busy ? null : _cancelActiveOrder,
+                        icon: const Icon(Icons.cancel_outlined),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(48),
+                        ),
+                        label: Text(i18n.t('cancel')),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -549,10 +573,7 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
           child: Text(_busy ? i18n.t('loading') : i18n.t('online_mode')),
         );
       }
-      return FilledButton.tonal(
-        onPressed: _busy ? null : () => _refreshOrders(),
-        child: Text(_busy ? i18n.t('loading') : i18n.t('refresh_orders')),
-      );
+      return const SizedBox.shrink();
     }
 
     if (order.status == 'DRIVER_ASSIGNED') {
@@ -582,9 +603,6 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
       );
     }
 
-    return FilledButton.tonal(
-      onPressed: _busy ? null : () => _refreshOrders(),
-      child: Text(_busy ? i18n.t('loading') : i18n.t('refresh_status')),
-    );
+    return const SizedBox.shrink();
   }
 }
