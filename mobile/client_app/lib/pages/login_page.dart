@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/taxi_api_client.dart';
 import '../core/colors.dart';
@@ -32,7 +33,30 @@ class _LoginPageState extends State<LoginPage> {
   bool _registerMode = true;
   AppRole _registerRole = AppRole.client;
   bool _submitting = false;
+  bool _obscurePassword = true;
+  bool _obscureConfirm = true;
   String? _error;
+
+  static const _kEmailKey = 'saved_email';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedEmail();
+  }
+
+  Future<void> _loadSavedEmail() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString(_kEmailKey);
+    if (saved != null && saved.isNotEmpty && mounted) {
+      _emailController.text = saved;
+    }
+  }
+
+  Future<void> _saveEmail(String email) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kEmailKey, email);
+  }
 
   @override
   void dispose() {
@@ -66,6 +90,8 @@ class _LoginPageState extends State<LoginPage> {
       final session = _registerMode
           ? await widget.apiClient.register(email, password, _registerRole)
           : await widget.apiClient.login(email, password);
+
+      await _saveEmail(email);
 
       if (!mounted) return;
       widget.onLoggedIn(session);
@@ -201,18 +227,32 @@ class _LoginPageState extends State<LoginPage> {
                           const SizedBox(height: 12),
                           TextField(
                             controller: _passwordController,
-                            obscureText: true,
+                            obscureText: _obscurePassword,
                             decoration: InputDecoration(
                               labelText: i18n.t('password_label'),
+                              suffixIcon: IconButton(
+                                icon: Icon(_obscurePassword
+                                    ? Icons.visibility_off_outlined
+                                    : Icons.visibility_outlined),
+                                onPressed: () => setState(
+                                    () => _obscurePassword = !_obscurePassword),
+                              ),
                             ),
                           ),
                           if (isRegister) ...[
                             const SizedBox(height: 12),
                             TextField(
                               controller: _confirmPasswordController,
-                              obscureText: true,
+                              obscureText: _obscureConfirm,
                               decoration: InputDecoration(
                                 labelText: i18n.t('confirm_password_label'),
+                                suffixIcon: IconButton(
+                                  icon: Icon(_obscureConfirm
+                                      ? Icons.visibility_off_outlined
+                                      : Icons.visibility_outlined),
+                                  onPressed: () => setState(
+                                      () => _obscureConfirm = !_obscureConfirm),
+                                ),
                               ),
                             ),
                             const SizedBox(height: 12),

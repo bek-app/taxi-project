@@ -1,5 +1,9 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
 import '../api/taxi_api_client.dart';
@@ -51,10 +55,21 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
   BackendOrder? _activeOrder;
   Position? _currentPosition;
 
+  // GPS stream
+  StreamSubscription<Position>? _positionSubscription;
+
+  // Search / geocoding
+  final TextEditingController _searchController = TextEditingController();
+  Timer? _debounce;
+  List<_GeoSuggestion> _suggestions = [];
+  bool _isSearching = false;
+  LatLng? _destinationLatLng;
+  String? _destinationName;
+
   LatLng? get _currentLatLng {
-    final current = _currentPosition;
-    if (current == null) return null;
-    return LatLng(current.latitude, current.longitude);
+    final p = _currentPosition;
+    if (p == null) return null;
+    return LatLng(p.latitude, p.longitude);
   }
 
   LatLng get _pickupPoint {
@@ -66,6 +81,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
   }
 
   LatLng get _dropoffPoint {
+    if (_destinationLatLng != null) return _destinationLatLng!;
     final order = _activeOrder;
     if (order?.dropoffLatitude != null && order?.dropoffLongitude != null) {
       return LatLng(order!.dropoffLatitude!, order.dropoffLongitude!);
@@ -97,13 +113,10 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
   }
 
   double get _durationMin => (_distanceKm * 2.8).roundToDouble();
-
   double get _baseFormulaPrice =>
       _baseFare + (_distanceKm * _perKm) + (_durationMin * _perMinute);
-
   double get _finalPrice =>
       _baseFormulaPrice * _tariffs[_selectedTariff].multiplier;
-
   double get _displayPrice => _activeOrder?.finalPrice ?? _finalPrice;
   AppI18n get _i18n => AppI18n(widget.lang);
 
@@ -113,9 +126,18 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     _refreshCurrentLocation();
   }
 
+  @override
+  void dispose() {
+    _positionSubscription?.cancel();
+    _searchController.dispose();
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  // ── Geolocation ──────────────────────────────────────────────────────────
+
   Future<void> _refreshCurrentLocation() async {
     if (_isLocating) return;
-
     setState(() {
       _isLocating = true;
       _locationError = null;
@@ -124,9 +146,12 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     try {
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        setState(() {
-          _locationError = _i18n.t('location_service_disabled');
-        });
+        if (mounted) {
+          setState(() {
+            _isLocating = false;
+            _locationError = _i18n.t('location_service_disabled');
+          });
+        }
         return;
       }
 
@@ -134,73 +159,137 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
       }
-
       if (permission == LocationPermission.denied ||
           permission == LocationPermission.deniedForever) {
-        setState(() {
-          _locationError = _i18n.t('location_permission_denied');
-        });
+        if (mounted) {
+          setState(() {
+            _isLocating = false;
+            _locationError = _i18n.t('location_permission_denied');
+          });
+        }
         return;
       }
 
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-        ),
+      // Cancel any existing stream before starting a new one
+      await _positionSubscription?.cancel();
+
+      const locationSettings = LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 5, // update every 5 metres
       );
 
-      if (!mounted) return;
-
-      setState(() {
-        _currentPosition = position;
-        _locationError = null;
-      });
+      _positionSubscription =
+          Geolocator.getPositionStream(locationSettings: locationSettings)
+              .listen(
+        (position) {
+          if (!mounted) return;
+          setState(() {
+            _currentPosition = position;
+            _locationError = null;
+            _isLocating = false;
+          });
+        },
+        onError: (_) {
+          if (!mounted) return;
+          setState(() {
+            _isLocating = false;
+            _locationError = _i18n.t('location_unknown');
+          });
+        },
+      );
     } catch (_) {
       if (!mounted) return;
       setState(() {
+        _isLocating = false;
         _locationError = _i18n.t('location_unknown');
       });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLocating = false;
-        });
-      }
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    switch (_step) {
-      case ClientFlowStep.home:
-        return _buildHomeScreen(context);
-      case ClientFlowStep.confirmRide:
-        return _buildConfirmRideScreen(context);
-      case ClientFlowStep.searching:
-        return _buildSearchingScreen(context);
-      case ClientFlowStep.tracking:
-        return _buildTrackingScreen(context);
-      case ClientFlowStep.completed:
-        return _buildCompletedScreen(context);
+  // ── Geocoding (Nominatim) ─────────────────────────────────────────────────
+
+  void _onSearchChanged(String value) {
+    _debounce?.cancel();
+    if (value.trim().length < 3) {
+      setState(() => _suggestions = []);
+      return;
+    }
+    _debounce = Timer(const Duration(milliseconds: 600),
+        () => _fetchNominatimSuggestions(value.trim()));
+  }
+
+  Future<void> _fetchNominatimSuggestions(String query) async {
+    if (!mounted) return;
+    setState(() => _isSearching = true);
+    try {
+      final uri = Uri.https('nominatim.openstreetmap.org', '/search', {
+        'q': query,
+        'format': 'json',
+        'limit': '5',
+        'countrycodes': 'kz',
+        'accept-language':
+            widget.lang == AppLang.kz ? 'kk,ru,en' : 'ru,kk,en',
+      });
+      final response = await http.get(
+        uri,
+        headers: {'User-Agent': 'TaxiMVP/1.0 (kz.taxi.project)'},
+      );
+      if (!mounted) return;
+      if (response.statusCode == 200) {
+        final list = jsonDecode(response.body) as List;
+        setState(() {
+          _suggestions = list
+              .map((item) => _GeoSuggestion(
+                    displayName: item['display_name'] as String,
+                    latLng: LatLng(
+                      double.parse(item['lat'] as String),
+                      double.parse(item['lon'] as String),
+                    ),
+                  ))
+              .toList();
+        });
+      }
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _isSearching = false);
     }
   }
+
+  void _selectDestination(_GeoSuggestion suggestion) {
+    final name = suggestion.displayName.split(',').first.trim();
+    setState(() {
+      _destinationLatLng = suggestion.latLng;
+      _destinationName = name;
+      _searchController.text = name;
+      _suggestions = [];
+    });
+    FocusManager.instance.primaryFocus?.unfocus();
+  }
+
+  void _clearDestination() {
+    setState(() {
+      _destinationLatLng = null;
+      _destinationName = null;
+      _searchController.clear();
+      _suggestions = [];
+    });
+  }
+
+  // ── Order flow ────────────────────────────────────────────────────────────
 
   Future<void> _confirmRideAndRequestDriver() async {
     if (_isSubmitting) return;
 
     if (widget.session.role == AppRole.driver) {
-      setState(() {
-        _errorMessage = _i18n.t('client_only_message');
-      });
+      setState(() => _errorMessage = _i18n.t('client_only_message'));
       return;
     }
 
     if (_currentPosition == null) {
       await _refreshCurrentLocation();
       if (_currentPosition == null) {
-        setState(() {
-          _errorMessage = _locationError ?? _i18n.t('location_unknown');
-        });
+        setState(
+            () => _errorMessage = _locationError ?? _i18n.t('location_unknown'));
         return;
       }
     }
@@ -226,25 +315,14 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
         durationMinutes: _durationMin,
         surgeMultiplier: _tariffs[_selectedTariff].multiplier,
       );
-
       if (!mounted) return;
-
-      setState(() {
-        _activeOrder = order;
-      });
-
+      setState(() => _activeOrder = order);
       await _searchDriverForCurrentOrder(showLoader: false);
     } catch (error) {
       if (!mounted) return;
-      setState(() {
-        _errorMessage = error.toString();
-      });
+      setState(() => _errorMessage = error.toString());
     } finally {
-      if (mounted) {
-        setState(() {
-          _isSubmitting = false;
-        });
-      }
+      if (mounted) setState(() => _isSubmitting = false);
     }
   }
 
@@ -261,25 +339,17 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
 
     try {
       final assigned = await widget.apiClient.searchDriver(order.id);
-
       if (!mounted) return;
-
-      setState(() {
-        _activeOrder = assigned;
-      });
+      setState(() => _activeOrder = assigned);
 
       if (assigned.driverId == null || assigned.status != 'DRIVER_ASSIGNED') {
-        setState(() {
-          _errorMessage = _i18n.t('driver_not_found');
-        });
+        setState(() => _errorMessage = _i18n.t('driver_not_found'));
         return;
       }
 
       final arriving = await widget.apiClient
           .updateOrderStatus(assigned.id, 'DRIVER_ARRIVING');
-
       if (!mounted) return;
-
       setState(() {
         _activeOrder = arriving;
         _step = ClientFlowStep.tracking;
@@ -287,22 +357,15 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
       });
     } catch (error) {
       if (!mounted) return;
-      setState(() {
-        _errorMessage = error.toString();
-      });
+      setState(() => _errorMessage = error.toString());
     } finally {
-      if (mounted && showLoader) {
-        setState(() {
-          _isSubmitting = false;
-        });
-      }
+      if (mounted && showLoader) setState(() => _isSubmitting = false);
     }
   }
 
   Future<void> _completeTrip() async {
     final order = _activeOrder;
     if (order == null || _isSubmitting) return;
-
     setState(() {
       _isSubmitting = true;
       _errorMessage = null;
@@ -311,31 +374,23 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     try {
       BackendOrder current = order;
       if (current.status != 'IN_PROGRESS') {
-        current =
-            await widget.apiClient.updateOrderStatus(current.id, 'IN_PROGRESS');
+        current = await widget.apiClient
+            .updateOrderStatus(current.id, 'IN_PROGRESS');
       }
       if (current.status != 'COMPLETED') {
         current =
             await widget.apiClient.updateOrderStatus(current.id, 'COMPLETED');
       }
-
       if (!mounted) return;
-
       setState(() {
         _activeOrder = current;
         _step = ClientFlowStep.completed;
       });
     } catch (error) {
       if (!mounted) return;
-      setState(() {
-        _errorMessage = error.toString();
-      });
+      setState(() => _errorMessage = error.toString());
     } finally {
-      if (mounted) {
-        setState(() {
-          _isSubmitting = false;
-        });
-      }
+      if (mounted) setState(() => _isSubmitting = false);
     }
   }
 
@@ -344,13 +399,9 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     if (order != null && order.canBeCanceled) {
       try {
         await widget.apiClient.updateOrderStatus(order.id, 'CANCELED');
-      } catch (_) {
-        // Ignore cancellation error when user just wants to leave flow.
-      }
+      } catch (_) {}
     }
-
     if (!mounted) return;
-
     setState(() {
       _activeOrder = null;
       _errorMessage = null;
@@ -359,8 +410,27 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     });
   }
 
+  // ── Screens ───────────────────────────────────────────────────────────────
+
+  @override
+  Widget build(BuildContext context) {
+    switch (_step) {
+      case ClientFlowStep.home:
+        return _buildHomeScreen(context);
+      case ClientFlowStep.confirmRide:
+        return _buildConfirmRideScreen(context);
+      case ClientFlowStep.searching:
+        return _buildSearchingScreen(context);
+      case ClientFlowStep.tracking:
+        return _buildTrackingScreen(context);
+      case ClientFlowStep.completed:
+        return _buildCompletedScreen(context);
+    }
+  }
+
   Widget _buildHomeScreen(BuildContext context) {
     final i18n = _i18n;
+    final hasDest = _destinationLatLng != null;
 
     return Scaffold(
       body: Stack(
@@ -368,39 +438,102 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
           Positioned.fill(
             child: MapBackdrop(
               currentLocation: _currentLatLng,
-              pickupPoint: _pickupPoint,
-              dropoffPoint: _dropoffPoint,
+              pickupPoint: _currentLatLng ?? _fallbackPickup,
+              dropoffPoint: hasDest ? _destinationLatLng : null,
             ),
           ),
+
+          // ── Search bar + suggestions ──────────────────────────────────
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 84, 16, 0),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: const [
-                    BoxShadow(
-                      color: Color(0x12000000),
-                      blurRadius: 24,
-                      offset: Offset(0, 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Color(0x12000000),
+                          blurRadius: 24,
+                          offset: Offset(0, 8),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-                child: TextField(
-                  decoration: InputDecoration(
-                    hintText: i18n.t('search_destination'),
-                    prefixIcon: const Icon(Icons.search),
-                    border: InputBorder.none,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 16,
+                    child: TextField(
+                      controller: _searchController,
+                      onChanged: _onSearchChanged,
+                      decoration: InputDecoration(
+                        hintText: i18n.t('search_destination'),
+                        prefixIcon: const Icon(Icons.search),
+                        suffixIcon: _isSearching
+                            ? const Padding(
+                                padding: EdgeInsets.all(12),
+                                child: SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: UiKitColors.primary),
+                                ),
+                              )
+                            : (hasDest
+                                ? IconButton(
+                                    icon: const Icon(Icons.clear),
+                                    onPressed: _clearDestination,
+                                  )
+                                : null),
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 16,
+                        ),
+                      ),
                     ),
                   ),
-                ),
+                  if (_suggestions.isNotEmpty)
+                    Card(
+                      margin: const EdgeInsets.only(top: 4),
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: _suggestions.length,
+                        separatorBuilder: (_, __) =>
+                            const Divider(height: 1, indent: 16),
+                        itemBuilder: (context, index) {
+                          final s = _suggestions[index];
+                          final title = s.displayName.split(',').first.trim();
+                          final subtitle = s.displayName
+                              .split(',')
+                              .skip(1)
+                              .take(2)
+                              .join(',')
+                              .trim();
+                          return ListTile(
+                            dense: true,
+                            leading: const Icon(Icons.location_on_outlined,
+                                color: UiKitColors.primary),
+                            title: Text(title),
+                            subtitle: subtitle.isNotEmpty
+                                ? Text(
+                                    subtitle,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  )
+                                : null,
+                            onTap: () => _selectDestination(s),
+                          );
+                        },
+                      ),
+                    ),
+                ],
               ),
             ),
           ),
+
+          // ── Bottom card ───────────────────────────────────────────────
           Align(
             alignment: Alignment.bottomCenter,
             child: SafeArea(
@@ -427,7 +560,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                       i18n.t('where_to'),
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 6),
                     Text(
                       i18n.t('signed_as', {'email': widget.session.email}),
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -435,26 +568,75 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                           ),
                     ),
                     const SizedBox(height: 6),
-                    Text(
-                      _isLocating
-                          ? i18n.t('locating')
-                          : (_locationError == null
-                              ? i18n.t('location_ready')
-                              : _locationError!),
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: _locationError == null
-                                ? UiKitColors.success
-                                : UiKitColors.danger,
-                            fontWeight: FontWeight.w600,
+                    Row(
+                      children: [
+                        Icon(
+                          _isLocating
+                              ? Icons.sync
+                              : (_locationError == null
+                                  ? Icons.my_location
+                                  : Icons.location_off),
+                          size: 14,
+                          color: _locationError == null
+                              ? UiKitColors.success
+                              : UiKitColors.danger,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            _isLocating
+                                ? i18n.t('locating')
+                                : (_locationError == null
+                                    ? i18n.t('location_ready')
+                                    : _locationError!),
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: _locationError == null
+                                          ? UiKitColors.success
+                                          : UiKitColors.danger,
+                                      fontWeight: FontWeight.w600,
+                                    ),
                           ),
+                        ),
+                        TextButton.icon(
+                          onPressed:
+                              _isLocating ? null : _refreshCurrentLocation,
+                          icon: const Icon(Icons.refresh, size: 16),
+                          label: const Text('GPS'),
+                          style: TextButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 12),
-                    OutlinedButton.icon(
-                      onPressed: _isLocating ? null : _refreshCurrentLocation,
-                      icon: const Icon(Icons.my_location),
-                      label: Text(i18n.t('refresh_location')),
-                    ),
-                    const SizedBox(height: 16),
+                    if (hasDest) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          const Icon(Icons.flag_rounded,
+                              color: UiKitColors.success, size: 16),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              _destinationName!,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(fontWeight: FontWeight.w600),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Text(
+                            '${_distanceKm.toStringAsFixed(1)} km',
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: UiKitColors.textSecondary,
+                                    ),
+                          ),
+                        ],
+                      ),
+                    ],
+                    const SizedBox(height: 14),
                     FilledButton(
                       onPressed: () =>
                           setState(() => _step = ClientFlowStep.confirmRide),
@@ -524,10 +706,8 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                             borderRadius: BorderRadius.circular(16)),
                         title: Text(i18n.t(tariff.nameKey)),
                         subtitle: Text(
-                          i18n.t(
-                            'tariff_multiplier',
-                            {'value': tariff.multiplier.toStringAsFixed(2)},
-                          ),
+                          i18n.t('tariff_multiplier',
+                              {'value': tariff.multiplier.toStringAsFixed(2)}),
                         ),
                         trailing: Text('${price.toStringAsFixed(0)} KZT'),
                         onTap: () => setState(() => _selectedTariff = index),
@@ -543,10 +723,8 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    i18n.t(
-                      'final_price',
-                      {'price': _finalPrice.toStringAsFixed(0)},
-                    ),
+                    i18n.t('final_price',
+                        {'price': _finalPrice.toStringAsFixed(0)}),
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           fontWeight: FontWeight.w600,
                         ),
@@ -603,16 +781,11 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                     Text(
                       _activeOrder == null
                           ? i18n.t('creating_order')
-                          : i18n.t(
-                              'order_short',
-                              {
-                                'id': _activeOrder!.id.substring(0, 8),
-                                'status': localizedOrderStatus(
-                                  widget.lang,
-                                  _activeOrder!.status,
-                                ),
-                              },
-                            ),
+                          : i18n.t('order_short', {
+                              'id': _activeOrder!.id.substring(0, 8),
+                              'status': localizedOrderStatus(
+                                  widget.lang, _activeOrder!.status),
+                            }),
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: UiKitColors.textSecondary,
@@ -661,9 +834,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
   Widget _buildTrackingScreen(BuildContext context) {
     final i18n = _i18n;
     final status = localizedOrderStatus(
-      widget.lang,
-      _activeOrder?.status ?? 'DRIVER_ARRIVING',
-    );
+        widget.lang, _activeOrder?.status ?? 'DRIVER_ARRIVING');
 
     return Scaffold(
       body: Stack(
@@ -760,8 +931,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                             style: OutlinedButton.styleFrom(
                               minimumSize: const Size.fromHeight(56),
                               shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
+                                  borderRadius: BorderRadius.circular(16)),
                             ),
                           ),
                         ),
@@ -853,4 +1023,12 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
       ),
     );
   }
+}
+
+// ── Models ────────────────────────────────────────────────────────────────────
+
+class _GeoSuggestion {
+  const _GeoSuggestion({required this.displayName, required this.latLng});
+  final String displayName;
+  final LatLng latLng;
 }

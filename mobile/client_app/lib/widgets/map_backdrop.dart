@@ -1,10 +1,14 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
 import '../core/colors.dart';
 
-class MapBackdrop extends StatelessWidget {
+class MapBackdrop extends StatefulWidget {
   const MapBackdrop({
     this.currentLocation,
     this.pickupPoint,
@@ -21,23 +25,197 @@ class MapBackdrop extends StatelessWidget {
   final LatLng? driverPoint;
 
   @override
+  State<MapBackdrop> createState() => _MapBackdropState();
+}
+
+class _MapBackdropState extends State<MapBackdrop> {
+  final _mapController = MapController();
+  static final Map<String, List<LatLng>> _routeCache = <String, List<LatLng>>{};
+  static const Duration _requestTimeout = Duration(seconds: 8);
+
+  List<LatLng>? _roadPolylinePoints;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshRoute();
+  }
+
+  @override
+  void didUpdateWidget(MapBackdrop oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final newCenter = widget.currentLocation;
+    if (newCenter != null && newCenter != oldWidget.currentLocation) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          try {
+            _mapController.move(newCenter, 14.5);
+          } catch (_) {}
+        }
+      });
+    }
+
+    final oldKey = _routeKey(_buildRouteWaypoints(oldWidget));
+    final newKey = _routeKey(_buildRouteWaypoints(widget));
+    if (oldKey != newKey) {
+      _refreshRoute();
+    }
+  }
+
+  @override
+  void dispose() {
+    _mapController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _refreshRoute() async {
+    final waypoints = _buildRouteWaypoints(widget);
+    if (waypoints.length < 2) {
+      if (mounted) {
+        setState(() {
+          _roadPolylinePoints = null;
+        });
+      }
+      return;
+    }
+
+    final cacheKey = _routeKey(waypoints);
+    final cached = _routeCache[cacheKey];
+    if (cached != null) {
+      if (mounted) {
+        setState(() {
+          _roadPolylinePoints = cached;
+        });
+      }
+      return;
+    }
+
+    try {
+      final route = await _fetchRoadRoute(waypoints);
+      if (!mounted) {
+        return;
+      }
+      _routeCache[cacheKey] = route;
+      setState(() {
+        _roadPolylinePoints = route;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _roadPolylinePoints = waypoints;
+      });
+    }
+  }
+
+  List<LatLng> _buildRouteWaypoints(MapBackdrop data) {
+    if (data.driverPoint != null &&
+        data.pickupPoint != null &&
+        data.dropoffPoint != null) {
+      return <LatLng>[data.driverPoint!, data.pickupPoint!, data.dropoffPoint!];
+    }
+    if (data.pickupPoint != null && data.dropoffPoint != null) {
+      return <LatLng>[data.pickupPoint!, data.dropoffPoint!];
+    }
+    return const <LatLng>[];
+  }
+
+  String _routeKey(List<LatLng> points) {
+    return points
+        .map(
+          (point) =>
+              '${point.latitude.toStringAsFixed(5)},${point.longitude.toStringAsFixed(5)}',
+        )
+        .join('|');
+  }
+
+  Future<List<LatLng>> _fetchRoadRoute(List<LatLng> points) async {
+    final coordinates = points
+        .map(
+          (point) =>
+              '${point.longitude.toStringAsFixed(6)},${point.latitude.toStringAsFixed(6)}',
+        )
+        .join(';');
+
+    final uri = Uri.https(
+      'router.project-osrm.org',
+      '/route/v1/driving/$coordinates',
+      const <String, String>{
+        'alternatives': 'false',
+        'overview': 'full',
+        'geometries': 'geojson',
+        'steps': 'false',
+      },
+    );
+
+    final response = await http.get(uri).timeout(_requestTimeout);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('Route API ${response.statusCode}');
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw Exception('Invalid route response');
+    }
+
+    final routes = decoded['routes'];
+    if (routes is! List || routes.isEmpty) {
+      throw Exception('No routes');
+    }
+
+    final first = routes.first;
+    if (first is! Map<String, dynamic>) {
+      throw Exception('Invalid route object');
+    }
+
+    final geometry = first['geometry'];
+    if (geometry is! Map<String, dynamic>) {
+      throw Exception('Missing geometry');
+    }
+
+    final coordinatesList = geometry['coordinates'];
+    if (coordinatesList is! List || coordinatesList.length < 2) {
+      throw Exception('Route too short');
+    }
+
+    final path = <LatLng>[];
+    for (final item in coordinatesList) {
+      if (item is List && item.length >= 2) {
+        final lon = (item[0] as num?)?.toDouble();
+        final lat = (item[1] as num?)?.toDouble();
+        if (lat != null && lon != null) {
+          path.add(LatLng(lat, lon));
+        }
+      }
+    }
+
+    if (path.length < 2) {
+      throw Exception('Invalid route path');
+    }
+
+    return path;
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final center = currentLocation ??
-        pickupPoint ??
-        dropoffPoint ??
-        driverPoint ??
-        _fallbackCenter;
+    final center = widget.currentLocation ??
+        widget.pickupPoint ??
+        widget.dropoffPoint ??
+        widget.driverPoint ??
+        MapBackdrop._fallbackCenter;
 
     final routePoints = <LatLng>[
-      if (pickupPoint != null) pickupPoint!,
-      if (driverPoint != null) driverPoint!,
-      if (dropoffPoint != null) dropoffPoint!,
+      if (widget.pickupPoint != null) widget.pickupPoint!,
+      if (widget.driverPoint != null) widget.driverPoint!,
+      if (widget.dropoffPoint != null) widget.dropoffPoint!,
     ];
+    final polylinePoints = _roadPolylinePoints ?? routePoints;
 
     final markers = <Marker>[
-      if (currentLocation != null)
+      if (widget.currentLocation != null)
         Marker(
-          point: currentLocation!,
+          point: widget.currentLocation!,
           width: 42,
           height: 42,
           child: const MapPin(
@@ -45,9 +223,9 @@ class MapBackdrop extends StatelessWidget {
             color: Color(0xFF0EA5E9),
           ),
         ),
-      if (pickupPoint != null)
+      if (widget.pickupPoint != null)
         Marker(
-          point: pickupPoint!,
+          point: widget.pickupPoint!,
           width: 42,
           height: 42,
           child: const MapPin(
@@ -55,9 +233,9 @@ class MapBackdrop extends StatelessWidget {
             color: Color(0xFF0284C7),
           ),
         ),
-      if (driverPoint != null)
+      if (widget.driverPoint != null)
         Marker(
-          point: driverPoint!,
+          point: widget.driverPoint!,
           width: 42,
           height: 42,
           child: const MapPin(
@@ -65,9 +243,9 @@ class MapBackdrop extends StatelessWidget {
             color: UiKitColors.primary,
           ),
         ),
-      if (dropoffPoint != null)
+      if (widget.dropoffPoint != null)
         Marker(
-          point: dropoffPoint!,
+          point: widget.dropoffPoint!,
           width: 42,
           height: 42,
           child: const MapPin(
@@ -80,22 +258,23 @@ class MapBackdrop extends StatelessWidget {
     return Stack(
       children: [
         FlutterMap(
+          mapController: _mapController,
           options: MapOptions(
             initialCenter: center,
-            initialZoom: currentLocation == null ? 12.8 : 14.2,
+            initialZoom: widget.currentLocation == null ? 12.0 : 14.5,
           ),
           children: [
             TileLayer(
               urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
               userAgentPackageName: 'kz.taxi.project',
             ),
-            if (routePoints.length >= 2)
+            if (polylinePoints.length >= 2)
               PolylineLayer(
                 polylines: [
                   Polyline(
-                    points: routePoints,
+                    points: polylinePoints,
                     color: UiKitColors.primary,
-                    strokeWidth: 5,
+                    strokeWidth: 6,
                   ),
                 ],
               ),
