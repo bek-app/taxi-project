@@ -25,12 +25,7 @@ flutter run -d web-server --web-hostname 127.0.0.1 --web-port 5050 --dart-define
 
 Single app алдымен login экранын ашады (`Taxi Super App`).
 Login бетінде және қолданба ішінде жоғарғы панельде `KZ/RU` тіл ауыстырғыш бар.
-
-Demo credentials:
-
-- `client@taxi.local / client123`
-- `driver@taxi.local / driver123`
-- `admin@taxi.local / admin123`
+Алдымен `register` арқылы тіркелу керек (email, password, role).
 
 ## Role switch
 

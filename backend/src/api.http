@@ -7,32 +7,43 @@ GET {{baseUrl}}/docs
 ### Health
 GET {{baseUrl}}/health
 
-### Register (optional)
+### Register client
 POST {{baseUrl}}/auth/register
 Content-Type: application/json
 
 {
-  "email": "newuser@taxi.local",
+  "email": "client1@taxi.local",
   "password": "password123",
   "role": "CLIENT"
 }
 
-### Login (demo client)
+### Register driver
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "driver1@taxi.local",
+  "password": "password123",
+  "role": "DRIVER"
+}
+
+### Login
 # @name login
 POST {{baseUrl}}/auth/login
 Content-Type: application/json
 
 {
-  "email": "client@taxi.local",
-  "password": "client123"
+  "email": "client1@taxi.local",
+  "password": "password123"
 }
 
 ### Who am I
+# @name me
 GET {{baseUrl}}/auth/me
 Authorization: Bearer {{token}}
 
 ### Driver online
-PATCH {{baseUrl}}/drivers/3fbf77cb-0b80-4b1e-84a4-c56b9d0f4da0/availability
+PATCH {{baseUrl}}/drivers/me/availability
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
@@ -41,7 +52,7 @@ Authorization: Bearer {{token}}
 }
 
 ### Driver location
-PATCH {{baseUrl}}/drivers/3fbf77cb-0b80-4b1e-84a4-c56b9d0f4da0/location
+PATCH {{baseUrl}}/drivers/me/location
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
@@ -57,7 +68,7 @@ Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-  "passengerId": "f3a51fc6-fd09-4c32-8c6f-46fd019e3472",
+  "passengerId": "{{me.response.body.id}}",
   "cityId": "almaty",
   "pickupLatitude": 43.238949,
   "pickupLongitude": 76.889709,

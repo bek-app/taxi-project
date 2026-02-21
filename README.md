@@ -34,11 +34,10 @@ API default: `http://localhost:3000`
 Swagger: `http://localhost:3000/api/docs`
 
 Auth:
+- `POST /api/auth/register`
 - `POST /api/auth/login`
-- Demo users:
-  - `client@taxi.local / client123`
-  - `driver@taxi.local / driver123`
-  - `admin@taxi.local / admin123`
+- `GET /api/auth/me` (Bearer token)
+- Алғашқы қолданушы міндетті түрде `register` арқылы тіркеледі (seed user жоқ).
 
 ## 2) Инфрақұрылым сервисі
 
@@ -58,7 +57,7 @@ flutter run --dart-define=API_BASE_URL=http://127.0.0.1:3000/api
 
 ## Келесі фаза
 
-1. Auth/роль (Client/Driver/Admin) енгізу
+1. Destination picker және нақты маршрут (polyline API арқылы)
 2. Payments және комиссияны нақты есептеу
 3. Multi-city (`city_id`, `zone_id`) қолдауы
 4. Order/Geo/Payment microservice-ке бөлу

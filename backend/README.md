@@ -18,12 +18,8 @@ Public endpoints:
 - `POST /api/auth/register`
 - `POST /api/auth/login`
 - `GET /api/auth/me` (Bearer token қажет)
-
-Demo users (seed on startup):
-
-- `client@taxi.local / client123`
-- `driver@taxi.local / driver123`
-- `admin@taxi.local / admin123`
+- Startup кезінде seed user жасалмайды: бірінші қолданушы `register` арқылы тіркеледі.
+- Қауіпсіздік: public `register` арқылы `ADMIN` рөлін ашуға болмайды.
 
 ## WebSocket
 
@@ -37,7 +33,7 @@ Demo users (seed on startup):
 - `POST /api/orders`
 - `POST /api/orders/:orderId/search-driver`
 - `PATCH /api/orders/:orderId/status`
-- `PATCH /api/drivers/:driverId/location`
-- `PATCH /api/drivers/:driverId/availability`
+- `PATCH /api/drivers/me/location`
+- `PATCH /api/drivers/me/availability`
 
 `/api/orders/*` және `/api/drivers/*` endpoint-тері Bearer token талап етеді.

@@ -6,6 +6,6 @@ void main() {
   testWidgets('Login screen renders', (WidgetTester tester) async {
     await tester.pumpWidget(const TaxiSuperApp());
 
-    expect(find.text('Taxi Super App'), findsOneWidget);
+    expect(find.text('Email'), findsOneWidget);
   });
 }

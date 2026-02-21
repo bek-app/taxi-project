@@ -1,5 +1,9 @@
-import { ConflictException, Injectable, OnModuleInit, UnauthorizedException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import {
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
@@ -12,17 +16,12 @@ import { JwtPayload } from './types/jwt-payload.type';
 import { UserRole } from './user-role.enum';
 
 @Injectable()
-export class AuthService implements OnModuleInit {
+export class AuthService {
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly jwtService: JwtService,
-    private readonly configService: ConfigService,
   ) {}
-
-  async onModuleInit(): Promise<void> {
-    await this.seedDemoUsers();
-  }
 
   async register(dto: RegisterDto): Promise<AuthResponse> {
     const normalizedEmail = dto.email.toLowerCase().trim();
@@ -30,6 +29,10 @@ export class AuthService implements OnModuleInit {
 
     if (existing) {
       throw new ConflictException('Email already exists');
+    }
+
+    if (dto.role === UserRole.ADMIN) {
+      throw new ForbiddenException('Admin role cannot be registered publicly');
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
@@ -70,42 +73,6 @@ export class AuthService implements OnModuleInit {
       email: user.email,
       role: user.role,
     };
-  }
-
-  private async seedDemoUsers(): Promise<void> {
-    const demos: Array<{ email: string; password: string; role: UserRole }> = [
-      {
-        email: this.configService.get<string>('DEMO_CLIENT_EMAIL', 'client@taxi.local'),
-        password: this.configService.get<string>('DEMO_CLIENT_PASSWORD', 'client123'),
-        role: UserRole.CLIENT,
-      },
-      {
-        email: this.configService.get<string>('DEMO_DRIVER_EMAIL', 'driver@taxi.local'),
-        password: this.configService.get<string>('DEMO_DRIVER_PASSWORD', 'driver123'),
-        role: UserRole.DRIVER,
-      },
-      {
-        email: this.configService.get<string>('DEMO_ADMIN_EMAIL', 'admin@taxi.local'),
-        password: this.configService.get<string>('DEMO_ADMIN_PASSWORD', 'admin123'),
-        role: UserRole.ADMIN,
-      },
-    ];
-
-    for (const demo of demos) {
-      const email = demo.email.toLowerCase().trim();
-      const existing = await this.userRepository.findOne({ where: { email } });
-      if (existing) {
-        continue;
-      }
-
-      const passwordHash = await bcrypt.hash(demo.password, 10);
-      const user = this.userRepository.create({
-        email,
-        passwordHash,
-        role: demo.role,
-      });
-      await this.userRepository.save(user);
-    }
   }
 
   private toAuthResponse(user: User): AuthResponse {
