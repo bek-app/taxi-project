@@ -6,7 +6,44 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 
 void main() {
-  runApp(const ClientApp());
+  runApp(const TaxiSuperApp());
+}
+
+enum AppRole { client, driver, admin }
+
+extension AppRoleX on AppRole {
+  String get label {
+    switch (this) {
+      case AppRole.client:
+        return 'Client';
+      case AppRole.driver:
+        return 'Driver';
+      case AppRole.admin:
+        return 'Admin';
+    }
+  }
+
+  String get backendValue {
+    switch (this) {
+      case AppRole.client:
+        return 'CLIENT';
+      case AppRole.driver:
+        return 'DRIVER';
+      case AppRole.admin:
+        return 'ADMIN';
+    }
+  }
+
+  static AppRole fromBackend(String value) {
+    switch (value.toUpperCase()) {
+      case 'DRIVER':
+        return AppRole.driver;
+      case 'ADMIN':
+        return AppRole.admin;
+      default:
+        return AppRole.client;
+    }
+  }
 }
 
 enum ClientFlowStep {
@@ -25,14 +62,14 @@ class UiKitColors {
   static const textPrimary = Color(0xFF111827);
 }
 
-class ClientApp extends StatelessWidget {
-  const ClientApp({super.key});
+class TaxiSuperApp extends StatelessWidget {
+  const TaxiSuperApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     final baseTextTheme = GoogleFonts.spaceGroteskTextTheme();
     return MaterialApp(
-      title: 'Taxi Client MVP',
+      title: 'Taxi MVP',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
@@ -71,13 +108,343 @@ class ClientApp extends StatelessWidget {
           ),
         ),
       ),
-      home: const ClientFlowPage(),
+      home: const AuthShell(),
+    );
+  }
+}
+
+class AuthShell extends StatefulWidget {
+  const AuthShell({super.key});
+
+  @override
+  State<AuthShell> createState() => _AuthShellState();
+}
+
+class _AuthShellState extends State<AuthShell> {
+  final TaxiApiClient _apiClient = TaxiApiClient();
+  AuthSession? _session;
+
+  void _onLoggedIn(AuthSession session) {
+    setState(() {
+      _session = session;
+    });
+  }
+
+  void _logout() {
+    _apiClient.clearAuth();
+    setState(() {
+      _session = null;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final session = _session;
+    if (session == null) {
+      return LoginPage(
+        apiClient: _apiClient,
+        onLoggedIn: _onLoggedIn,
+      );
+    }
+
+    return RoleSwitcherShell(
+      apiClient: _apiClient,
+      session: session,
+      onLogout: _logout,
+    );
+  }
+}
+
+class LoginPage extends StatefulWidget {
+  const LoginPage({
+    required this.apiClient,
+    required this.onLoggedIn,
+    super.key,
+  });
+
+  final TaxiApiClient apiClient;
+  final ValueChanged<AuthSession> onLoggedIn;
+
+  @override
+  State<LoginPage> createState() => _LoginPageState();
+}
+
+class _LoginPageState extends State<LoginPage> {
+  final TextEditingController _emailController = TextEditingController(text: 'client@taxi.local');
+  final TextEditingController _passwordController = TextEditingController(text: 'client123');
+  bool _submitting = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _login() async {
+    if (_submitting) {
+      return;
+    }
+
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+
+    try {
+      final session = await widget.apiClient.login(
+        _emailController.text.trim(),
+        _passwordController.text,
+      );
+
+      if (!mounted) {
+        return;
+      }
+      widget.onLoggedIn(session);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = error.toString();
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _submitting = false;
+        });
+      }
+    }
+  }
+
+  void _fillDemo(String email, String password) {
+    setState(() {
+      _emailController.text = email;
+      _passwordController.text = password;
+      _error = null;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Card(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'Taxi Auth Login',
+                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'API: ${widget.apiClient.baseUrl}',
+                      style: const TextStyle(color: Color(0xFF6B7280)),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: _emailController,
+                      keyboardType: TextInputType.emailAddress,
+                      decoration: const InputDecoration(
+                        labelText: 'Email',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _passwordController,
+                      obscureText: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Password',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        OutlinedButton(
+                          onPressed: _submitting ? null : () => _fillDemo('client@taxi.local', 'client123'),
+                          child: const Text('Demo Client'),
+                        ),
+                        OutlinedButton(
+                          onPressed: _submitting ? null : () => _fillDemo('driver@taxi.local', 'driver123'),
+                          child: const Text('Demo Driver'),
+                        ),
+                        OutlinedButton(
+                          onPressed: _submitting ? null : () => _fillDemo('admin@taxi.local', 'admin123'),
+                          child: const Text('Demo Admin'),
+                        ),
+                      ],
+                    ),
+                    if (_error != null) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        _error!,
+                        style: const TextStyle(color: UiKitColors.danger, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                    FilledButton(
+                      onPressed: _submitting ? null : _login,
+                      child: Text(_submitting ? 'Signing in...' : 'Sign In'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class RoleSwitcherShell extends StatefulWidget {
+  const RoleSwitcherShell({
+    required this.apiClient,
+    required this.session,
+    required this.onLogout,
+    super.key,
+  });
+
+  final TaxiApiClient apiClient;
+  final AuthSession session;
+  final VoidCallback onLogout;
+
+  @override
+  State<RoleSwitcherShell> createState() => _RoleSwitcherShellState();
+}
+
+class _RoleSwitcherShellState extends State<RoleSwitcherShell> {
+  late AppRole _activeRole;
+
+  @override
+  void initState() {
+    super.initState();
+    _activeRole = widget.session.role == AppRole.admin ? AppRole.client : widget.session.role;
+  }
+
+  List<AppRole> get _allowedRoles {
+    if (widget.session.role == AppRole.admin) {
+      return const [AppRole.client, AppRole.driver];
+    }
+    return [widget.session.role];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final allowedRoles = _allowedRoles;
+
+    return Stack(
+      children: [
+        IndexedStack(
+          index: _activeRole == AppRole.driver ? 1 : 0,
+          children: [
+            ClientFlowPage(
+              apiClient: widget.apiClient,
+              session: widget.session,
+            ),
+            DriverFlowPage(apiClient: widget.apiClient),
+          ],
+        ),
+        SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xEEFFFFFF),
+                    borderRadius: BorderRadius.circular(14),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x1F000000),
+                        blurRadius: 20,
+                        offset: Offset(0, 8),
+                      ),
+                    ],
+                  ),
+                  child: Text('${widget.session.email} (${widget.session.role.label})'),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xEEFFFFFF),
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x1F000000),
+                        blurRadius: 20,
+                        offset: Offset(0, 8),
+                      ),
+                    ],
+                  ),
+                  child: SegmentedButton<AppRole>(
+                    segments: allowedRoles
+                        .map(
+                          (role) => ButtonSegment(
+                            value: role,
+                            label: Text(role.label),
+                            icon: Icon(role == AppRole.driver ? Icons.local_taxi_outlined : Icons.person_pin_circle_outlined),
+                          ),
+                        )
+                        .toList(),
+                    selected: <AppRole>{_activeRole},
+                    onSelectionChanged: (Set<AppRole> selected) {
+                      if (selected.isEmpty) {
+                        return;
+                      }
+                      setState(() => _activeRole = selected.first);
+                    },
+                    style: ButtonStyle(
+                      visualDensity: VisualDensity.compact,
+                      side: const WidgetStatePropertyAll(BorderSide.none),
+                      shape: WidgetStatePropertyAll(
+                        RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton.filledTonal(
+                  onPressed: widget.onLogout,
+                  icon: const Icon(Icons.logout),
+                  tooltip: 'Logout',
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
 
 class ClientFlowPage extends StatefulWidget {
-  const ClientFlowPage({super.key});
+  const ClientFlowPage({
+    required this.apiClient,
+    required this.session,
+    super.key,
+  });
+
+  final TaxiApiClient apiClient;
+  final AuthSession session;
 
   @override
   State<ClientFlowPage> createState() => _ClientFlowPageState();
@@ -94,8 +461,6 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     Tariff(name: 'Comfort', multiplier: 1.25),
     Tariff(name: 'Business', multiplier: 1.5),
   ];
-
-  final TaxiApiClient _apiClient = TaxiApiClient();
 
   ClientFlowStep _step = ClientFlowStep.home;
   int _selectedTariff = 0;
@@ -138,9 +503,10 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     });
 
     try {
-      await _apiClient.prepareDemoDriver();
+      await widget.apiClient.prepareDemoDriver();
 
-      final order = await _apiClient.createOrder(
+      final order = await widget.apiClient.createOrder(
+        passengerId: widget.session.userId,
         cityId: 'almaty',
         distanceKm: _distanceKm,
         durationMinutes: _durationMin,
@@ -186,7 +552,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     }
 
     try {
-      final assigned = await _apiClient.searchDriver(order.id);
+      final assigned = await widget.apiClient.searchDriver(order.id);
 
       if (!mounted) {
         return;
@@ -203,7 +569,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
         return;
       }
 
-      final arriving = await _apiClient.updateOrderStatus(assigned.id, 'DRIVER_ARRIVING');
+      final arriving = await widget.apiClient.updateOrderStatus(assigned.id, 'DRIVER_ARRIVING');
 
       if (!mounted) {
         return;
@@ -244,10 +610,10 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     try {
       BackendOrder current = order;
       if (current.status != 'IN_PROGRESS') {
-        current = await _apiClient.updateOrderStatus(current.id, 'IN_PROGRESS');
+        current = await widget.apiClient.updateOrderStatus(current.id, 'IN_PROGRESS');
       }
       if (current.status != 'COMPLETED') {
-        current = await _apiClient.updateOrderStatus(current.id, 'COMPLETED');
+        current = await widget.apiClient.updateOrderStatus(current.id, 'COMPLETED');
       }
 
       if (!mounted) {
@@ -278,7 +644,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     final order = _activeOrder;
     if (order != null && order.canBeCanceled) {
       try {
-        await _apiClient.updateOrderStatus(order.id, 'CANCELED');
+        await widget.apiClient.updateOrderStatus(order.id, 'CANCELED');
       } catch (_) {
         // Ignore cancellation error when user just wants to leave flow.
       }
@@ -303,7 +669,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
           const Positioned.fill(child: _MapBackdrop()),
           SafeArea(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              padding: const EdgeInsets.fromLTRB(16, 84, 16, 0),
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   color: Colors.white,
@@ -355,7 +721,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'API: ${_apiClient.baseUrl}',
+                      'Signed in as: ${widget.session.email}',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: const Color(0xFF6B7280),
                           ),
@@ -686,6 +1052,235 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
   }
 }
 
+class DriverFlowPage extends StatefulWidget {
+  const DriverFlowPage({required this.apiClient, super.key});
+
+  final TaxiApiClient apiClient;
+
+  @override
+  State<DriverFlowPage> createState() => _DriverFlowPageState();
+}
+
+class _DriverFlowPageState extends State<DriverFlowPage> {
+  bool _online = false;
+  bool _busy = false;
+  String? _error;
+  BackendOrder? _activeOrder;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshOrders();
+  }
+
+  Future<void> _runWithLoader(Future<void> Function() action) async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await action();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = error.toString();
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _toggleOnline(bool value) async {
+    await _runWithLoader(() async {
+      await widget.apiClient.setDriverAvailability(value);
+      if (value) {
+        await widget.apiClient.updateDriverLocation();
+      }
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _online = value;
+      });
+
+      if (value) {
+        await _refreshOrders(showLoader: false);
+      } else {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _activeOrder = null;
+        });
+      }
+    });
+  }
+
+  Future<void> _refreshOrders({bool showLoader = true}) async {
+    Future<void> action() async {
+      final orders = await widget.apiClient.listOrders();
+      BackendOrder? candidate;
+
+      for (final order in orders) {
+        if (order.status == 'COMPLETED' || order.status == 'CANCELED') {
+          continue;
+        }
+        candidate = order;
+        break;
+      }
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _activeOrder = candidate;
+      });
+    }
+
+    if (showLoader) {
+      await _runWithLoader(action);
+    } else {
+      await action();
+    }
+  }
+
+  Future<void> _acceptRide() async {
+    final order = _activeOrder;
+    if (order == null) {
+      return;
+    }
+
+    await _runWithLoader(() async {
+      BackendOrder next = order;
+      if (order.status == 'SEARCHING_DRIVER' || order.status == 'CREATED') {
+        next = await widget.apiClient.searchDriver(order.id);
+      }
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _activeOrder = next;
+      });
+    });
+  }
+
+  Future<void> _updateStatus(String status) async {
+    final order = _activeOrder;
+    if (order == null) {
+      return;
+    }
+
+    await _runWithLoader(() async {
+      final next = await widget.apiClient.updateOrderStatus(order.id, status);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _activeOrder = next;
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final order = _activeOrder;
+    final canAccept = _online && order != null && (order.status == 'SEARCHING_DRIVER' || order.status == 'CREATED');
+    final canArriving = _online && order != null && order.status == 'DRIVER_ASSIGNED';
+    final canStart = _online && order != null && order.status == 'DRIVER_ARRIVING';
+    final canComplete = _online && order != null && order.status == 'IN_PROGRESS';
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Driver Workspace'),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+        children: [
+          const SizedBox(height: 56),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Online mode'),
+            subtitle: const Text('Redis availability + geo location update'),
+            value: _online,
+            onChanged: _busy ? null : _toggleOnline,
+          ),
+          const SizedBox(height: 8),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Current order', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  if (order == null)
+                    const Text('Белсенді тапсырыс жоқ.')
+                  else ...[
+                    Text('Order ID: ${order.id}'),
+                    const SizedBox(height: 4),
+                    Text('Status: ${order.status}'),
+                    const SizedBox(height: 4),
+                    Text('Final price: ${order.finalPrice.toStringAsFixed(0)} KZT'),
+                    const SizedBox(height: 4),
+                    Text('Driver ID: ${order.driverId ?? '-'}'),
+                  ],
+                  if (_error != null) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      _error!,
+                      style: const TextStyle(color: UiKitColors.danger, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.tonal(
+            onPressed: _busy ? null : () => _refreshOrders(),
+            child: Text(_busy ? 'Loading...' : 'Refresh Orders'),
+          ),
+          const SizedBox(height: 8),
+          FilledButton(
+            onPressed: _busy || !canAccept ? null : _acceptRide,
+            child: const Text('Accept Ride'),
+          ),
+          const SizedBox(height: 8),
+          FilledButton.tonal(
+            onPressed: _busy || !canArriving ? null : () => _updateStatus('DRIVER_ARRIVING'),
+            child: const Text('Set Arriving'),
+          ),
+          const SizedBox(height: 8),
+          FilledButton.tonal(
+            onPressed: _busy || !canStart ? null : () => _updateStatus('IN_PROGRESS'),
+            child: const Text('Start Ride'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton(
+            onPressed: _busy || !canComplete ? null : () => _updateStatus('COMPLETED'),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(56),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            ),
+            child: const Text('Complete Ride'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class Tariff {
   const Tariff({
     required this.name,
@@ -694,6 +1289,20 @@ class Tariff {
 
   final String name;
   final double multiplier;
+}
+
+class AuthSession {
+  const AuthSession({
+    required this.token,
+    required this.userId,
+    required this.email,
+    required this.role,
+  });
+
+  final String token;
+  final String userId;
+  final String email;
+  final AppRole role;
 }
 
 class BackendOrder {
@@ -734,13 +1343,13 @@ class TaxiApiClient {
   TaxiApiClient({http.Client? client}) : _client = client ?? http.Client();
 
   static const String _demoDriverId = '3fbf77cb-0b80-4b1e-84a4-c56b9d0f4da0';
-  static const String _demoPassengerId = 'f3a51fc6-fd09-4c32-8c6f-46fd019e3472';
   static const double _demoPickupLat = 43.238949;
   static const double _demoPickupLng = 76.889709;
   static const double _demoDropoffLat = 43.240978;
   static const double _demoDropoffLng = 76.924758;
 
   final http.Client _client;
+  String? _accessToken;
 
   String get baseUrl {
     const String fromEnv = String.fromEnvironment('API_BASE_URL', defaultValue: '');
@@ -759,11 +1368,52 @@ class TaxiApiClient {
     return 'http://127.0.0.1:3000/api';
   }
 
+  Future<AuthSession> login(String email, String password) async {
+    final response = await _post(
+      '/auth/login',
+      body: {
+        'email': email,
+        'password': password,
+      },
+      includeAuth: false,
+    );
+
+    final decoded = _decodeAsMap(response);
+    final token = (decoded['accessToken'] ?? '').toString();
+    final userMap = (decoded['user'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
+
+    if (token.isEmpty || userMap.isEmpty) {
+      throw Exception('Invalid login response');
+    }
+
+    final session = AuthSession(
+      token: token,
+      userId: (userMap['id'] ?? '').toString(),
+      email: (userMap['email'] ?? '').toString(),
+      role: AppRoleX.fromBackend((userMap['role'] ?? 'CLIENT').toString()),
+    );
+
+    _accessToken = token;
+    return session;
+  }
+
+  void clearAuth() {
+    _accessToken = null;
+  }
+
   Future<void> prepareDemoDriver() async {
+    await setDriverAvailability(true);
+    await updateDriverLocation();
+  }
+
+  Future<void> setDriverAvailability(bool online) async {
     await _patch(
       '/drivers/$_demoDriverId/availability',
-      body: const {'online': true},
+      body: {'online': online},
     );
+  }
+
+  Future<void> updateDriverLocation() async {
     await _patch(
       '/drivers/$_demoDriverId/location',
       body: const {
@@ -773,7 +1423,14 @@ class TaxiApiClient {
     );
   }
 
+  Future<List<BackendOrder>> listOrders() async {
+    final response = await _get('/orders');
+    final decoded = _decodeAsList(response);
+    return decoded.map(BackendOrder.fromJson).toList(growable: false);
+  }
+
   Future<BackendOrder> createOrder({
+    required String passengerId,
     required String cityId,
     required double distanceKm,
     required double durationMinutes,
@@ -782,7 +1439,7 @@ class TaxiApiClient {
     final response = await _post(
       '/orders',
       body: {
-        'passengerId': _demoPassengerId,
+        'passengerId': passengerId,
         'cityId': cityId,
         'pickupLatitude': _demoPickupLat,
         'pickupLongitude': _demoPickupLng,
@@ -809,20 +1466,39 @@ class TaxiApiClient {
     return BackendOrder.fromJson(_decodeAsMap(response));
   }
 
-  Future<http.Response> _post(String path, {Map<String, dynamic>? body}) {
+  Future<http.Response> _get(String path, {bool includeAuth = true}) {
+    return _client.get(
+      Uri.parse('$baseUrl$path'),
+      headers: _headers(includeAuth: includeAuth),
+    );
+  }
+
+  Future<http.Response> _post(String path, {Map<String, dynamic>? body, bool includeAuth = true}) {
     return _client.post(
       Uri.parse('$baseUrl$path'),
-      headers: const {'Content-Type': 'application/json'},
+      headers: _headers(includeAuth: includeAuth),
       body: body == null ? null : jsonEncode(body),
     );
   }
 
-  Future<http.Response> _patch(String path, {Map<String, dynamic>? body}) {
+  Future<http.Response> _patch(String path, {Map<String, dynamic>? body, bool includeAuth = true}) {
     return _client.patch(
       Uri.parse('$baseUrl$path'),
-      headers: const {'Content-Type': 'application/json'},
+      headers: _headers(includeAuth: includeAuth),
       body: body == null ? null : jsonEncode(body),
     );
+  }
+
+  Map<String, String> _headers({required bool includeAuth}) {
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+    };
+
+    if (includeAuth && _accessToken != null && _accessToken!.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $_accessToken';
+    }
+
+    return headers;
   }
 
   Map<String, dynamic> _decodeAsMap(http.Response response) {
@@ -836,6 +1512,22 @@ class TaxiApiClient {
     }
 
     return decoded;
+  }
+
+  List<Map<String, dynamic>> _decodeAsList(http.Response response) {
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('API ${response.statusCode}: ${response.body}');
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! List) {
+      throw Exception('Unexpected API list response: ${response.body}');
+    }
+
+    return decoded
+        .whereType<Map>()
+        .map((item) => item.map((key, value) => MapEntry(key.toString(), value)))
+        .toList(growable: false);
   }
 }
 

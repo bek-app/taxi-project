@@ -1,24 +1,31 @@
 # Mobile Apps (Flutter)
 
-Бұл каталогта екі app-тың бастапқы коды бар:
+Қазір негізгі frontend бір проектке біріктірілді:
 
-- `client_app` — жолаушы интерфейсі
-- `driver_app` — жүргізуші интерфейсі
+- `client_app` — single app, ішінде `Client/Driver` role switch бар
+- `driver_app` — legacy scaffold (міндетті емес)
 
-## Неге platform файлдары жоқ
-
-Ағымдағы ортада Flutter SDK орнатылмаған. Сондықтан тек бизнес-логикаға керек бастапқы Dart коды берілді.
-
-Flutter орнатылған соң әр app ішінде:
+## Run (single app)
 
 ```bash
-flutter create .
+cd mobile/client_app
 flutter pub get
-flutter run
-```
-
-Backend URL override үшін:
-
-```bash
 flutter run --dart-define=API_BASE_URL=http://127.0.0.1:3000/api
 ```
+
+## Auth login
+
+Single app алдымен login экранын ашады (`Taxi Auth Login`).
+
+Demo credentials:
+
+- `client@taxi.local / client123`
+- `driver@taxi.local / driver123`
+- `admin@taxi.local / admin123`
+
+## Role switch
+
+`client_app` ішінде экранның жоғарғы оң жағындағы switch арқылы рөлді ауыстыруға болады:
+
+- `Client`
+- `Driver`

@@ -5,8 +5,8 @@
 ## Құрылым
 
 - `backend/` — NestJS API (Order lifecycle, matchmaking, pricing, WebSocket events)
-- `mobile/client_app/` — Flutter клиент қосымшасының бастапқы коды
-- `mobile/driver_app/` — Flutter жүргізуші қосымшасының бастапқы коды
+- `mobile/client_app/` — Flutter single app (`Client/Driver` role switch)
+- `mobile/driver_app/` — legacy scaffold (міндетті емес)
 - `docker-compose.yml` — PostgreSQL + Redis локал сервисі
 
 ## Қамтылған MVP логика
@@ -33,6 +33,13 @@ npm run start:dev
 API default: `http://localhost:3000`
 Swagger: `http://localhost:3000/api/docs`
 
+Auth:
+- `POST /api/auth/login`
+- Demo users:
+  - `client@taxi.local / client123`
+  - `driver@taxi.local / driver123`
+  - `admin@taxi.local / admin123`
+
 ## 2) Инфрақұрылым сервисі
 
 Талап: Docker
@@ -41,24 +48,12 @@ Swagger: `http://localhost:3000/api/docs`
 docker compose up -d
 ```
 
-## 3) Flutter app-тарды бастау
-
-Бұл ортада `flutter` орнатылмаған, сондықтан қаңқа ғана дайындалды.
-
-Flutter орнатылғаннан кейін:
+## 3) Flutter app-ты бастау (single app)
 
 ```bash
 cd mobile/client_app
-flutter create .
 flutter pub get
-flutter run
-```
-
-```bash
-cd mobile/driver_app
-flutter create .
-flutter pub get
-flutter run
+flutter run --dart-define=API_BASE_URL=http://127.0.0.1:3000/api
 ```
 
 ## Келесі фаза

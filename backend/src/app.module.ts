@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AuthModule } from './auth/auth.module';
 import { DriversModule } from './drivers/drivers.module';
 import { GeoModule } from './geo/geo.module';
 import { HealthModule } from './health/health.module';
@@ -24,6 +25,7 @@ import { PricingModule } from './pricing/pricing.module';
         synchronize: true,
       }),
     }),
+    AuthModule,
     GeoModule,
     PricingModule,
     MatchmakingModule,

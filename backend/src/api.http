@@ -1,20 +1,49 @@
+@baseUrl = http://localhost:3000/api
+@token = {{login.response.body.accessToken}}
+
 ### Swagger UI
-GET http://localhost:3000/api/docs
+GET {{baseUrl}}/docs
 
 ### Health
-GET http://localhost:3000/api/health
+GET {{baseUrl}}/health
+
+### Register (optional)
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "newuser@taxi.local",
+  "password": "password123",
+  "role": "CLIENT"
+}
+
+### Login (demo client)
+# @name login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "client@taxi.local",
+  "password": "client123"
+}
+
+### Who am I
+GET {{baseUrl}}/auth/me
+Authorization: Bearer {{token}}
 
 ### Driver online
-PATCH http://localhost:3000/api/drivers/3fbf77cb-0b80-4b1e-84a4-c56b9d0f4da0/availability
+PATCH {{baseUrl}}/drivers/3fbf77cb-0b80-4b1e-84a4-c56b9d0f4da0/availability
 Content-Type: application/json
+Authorization: Bearer {{token}}
 
 {
   "online": true
 }
 
 ### Driver location
-PATCH http://localhost:3000/api/drivers/3fbf77cb-0b80-4b1e-84a4-c56b9d0f4da0/location
+PATCH {{baseUrl}}/drivers/3fbf77cb-0b80-4b1e-84a4-c56b9d0f4da0/location
 Content-Type: application/json
+Authorization: Bearer {{token}}
 
 {
   "latitude": 43.238949,
@@ -22,8 +51,10 @@ Content-Type: application/json
 }
 
 ### Create order
-POST http://localhost:3000/api/orders
+# @name createOrder
+POST {{baseUrl}}/orders
 Content-Type: application/json
+Authorization: Bearer {{token}}
 
 {
   "passengerId": "f3a51fc6-fd09-4c32-8c6f-46fd019e3472",
@@ -37,11 +68,13 @@ Content-Type: application/json
 }
 
 ### Search driver
-POST http://localhost:3000/api/orders/{{order_id}}/search-driver
+POST {{baseUrl}}/orders/{{createOrder.response.body.id}}/search-driver
+Authorization: Bearer {{token}}
 
 ### Update status
-PATCH http://localhost:3000/api/orders/{{order_id}}/status
+PATCH {{baseUrl}}/orders/{{createOrder.response.body.id}}/status
 Content-Type: application/json
+Authorization: Bearer {{token}}
 
 {
   "status": "IN_PROGRESS"

@@ -21,6 +21,14 @@ async function bootstrap(): Promise<void> {
     .setTitle('Taxi MVP API')
     .setDescription('Taxi MVP backend (orders, drivers, matchmaking, pricing)')
     .setVersion('1.0.0')
+    .addBearerAuth(
+      {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+      },
+      'jwt',
+    )
     .build();
   const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('api/docs', app, swaggerDocument);
