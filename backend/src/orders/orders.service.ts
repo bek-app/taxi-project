@@ -1,11 +1,12 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { AuthUser } from '../auth/types/auth-user.type';
 import { UserRole } from '../auth/user-role.enum';
 import { MatchmakingService } from '../matchmaking/matchmaking.service';
@@ -19,6 +20,14 @@ import { isTransitionAllowed } from './order-transition.map';
 
 @Injectable()
 export class OrdersService {
+  private static readonly BLOCKING_PASSENGER_STATUSES: OrderStatus[] = [
+    OrderStatus.CREATED,
+    OrderStatus.SEARCHING_DRIVER,
+    OrderStatus.DRIVER_ASSIGNED,
+    OrderStatus.DRIVER_ARRIVING,
+    OrderStatus.IN_PROGRESS,
+  ];
+
   constructor(
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
@@ -58,7 +67,9 @@ export class OrdersService {
     return order;
   }
 
-  async createOrder(dto: CreateOrderDto): Promise<Order> {
+  async createOrder(dto: CreateOrderDto, _user?: AuthUser): Promise<Order> {
+    await this.assertPassengerHasNoActiveOrder(dto.passengerId);
+
     const defaults = this.pricingService.getDefaultTariff();
     const baseFare = dto.baseFare ?? defaults.baseFare;
     const perKm = dto.perKm ?? defaults.perKm;
@@ -119,6 +130,7 @@ export class OrdersService {
     order.driverId = driverId;
     order.status = OrderStatus.DRIVER_ASSIGNED;
     const saved = await this.orderRepository.save(order);
+    await this.matchmakingService.setDriverBusy(driverId, true);
     this.orderEventsGateway.emitOrderUpdated(saved);
     return saved;
   }
@@ -234,5 +246,23 @@ export class OrdersService {
     if (nextStatus === OrderStatus.SEARCHING_DRIVER) {
       throw new ForbiddenException('SEARCHING_DRIVER is managed by matchmaking');
     }
+  }
+
+  private async assertPassengerHasNoActiveOrder(passengerId: string): Promise<void> {
+    const existing = await this.orderRepository.findOne({
+      where: {
+        passengerId,
+        status: In(OrdersService.BLOCKING_PASSENGER_STATUSES),
+      },
+      order: { createdAt: 'DESC' },
+    });
+
+    if (!existing) {
+      return;
+    }
+
+    throw new ConflictException(
+      `Passenger already has active order: ${existing.id} (${existing.status})`,
+    );
   }
 }

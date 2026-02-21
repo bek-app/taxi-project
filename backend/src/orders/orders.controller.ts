@@ -47,7 +47,7 @@ export class OrdersController {
     if (req.user.role === UserRole.CLIENT && req.user.userId !== dto.passengerId) {
       throw new ForbiddenException('Client can create order only for own passengerId');
     }
-    return this.ordersService.createOrder(dto);
+    return this.ordersService.createOrder(dto, req.user);
   }
 
   @Post(':orderId/search-driver')

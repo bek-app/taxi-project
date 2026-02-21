@@ -159,10 +159,15 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
   bool get _needsRouteEstimate =>
       _destinationLatLng != null || _activeOrder != null;
 
+  bool _isBlockingOrderStatus(String status) {
+    return status != 'COMPLETED' && status != 'CANCELED';
+  }
+
   @override
   void initState() {
     super.initState();
     _refreshCurrentLocation();
+    unawaited(_restoreActiveOrderIfNeeded());
     _startNearbyDriversPolling();
     _scheduleRouteRefresh(delay: Duration.zero);
   }
@@ -529,6 +534,35 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
 
   // ── Online drivers / order polling ───────────────────────────────────────
 
+  Future<void> _restoreActiveOrderIfNeeded() async {
+    if (widget.session.role != AppRole.client) {
+      return;
+    }
+
+    try {
+      final orders = await widget.apiClient.listOrders();
+      if (!mounted || orders.isEmpty) return;
+
+      BackendOrder? active;
+      for (final order in orders) {
+        if (_isBlockingOrderStatus(order.status)) {
+          active = order;
+          break;
+        }
+      }
+
+      if (active == null) {
+        return;
+      }
+
+      setState(() {
+        _activeOrder = active;
+      });
+      _scheduleRouteRefresh(delay: Duration.zero);
+      _syncStepWithOrder(active);
+    } catch (_) {}
+  }
+
   void _startNearbyDriversPolling() {
     _nearbyDriversTimer?.cancel();
     _nearbyDriversTimer = Timer.periodic(
@@ -572,7 +606,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
       const Duration(seconds: 5),
       (_) {
         final status = _activeOrder?.status;
-        if (status == 'SEARCHING_DRIVER') {
+        if (status == 'CREATED' || status == 'SEARCHING_DRIVER') {
           _searchDriverForCurrentOrder(
             showLoader: false,
             showNotFoundError: false,
@@ -645,7 +679,8 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     }
 
     if (order.status == 'SEARCHING_DRIVER' ||
-        order.status == 'DRIVER_ASSIGNED') {
+        order.status == 'DRIVER_ASSIGNED' ||
+        order.status == 'CREATED') {
       _startOrderPolling();
       setState(() => _step = ClientFlowStep.searching);
       return;
@@ -781,6 +816,13 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
       return;
     }
 
+    final existing = _activeOrder;
+    if (existing != null && _isBlockingOrderStatus(existing.status)) {
+      setState(() => _errorMessage = _i18n.t('active_order_exists'));
+      _syncStepWithOrder(existing);
+      return;
+    }
+
     if (_currentPosition == null) {
       await _refreshCurrentLocation();
       if (_currentPosition == null) {
@@ -820,7 +862,12 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
       await _searchDriverForCurrentOrder(showLoader: false);
     } catch (error) {
       if (!mounted) return;
-      setState(() => _errorMessage = error.toString());
+      final raw = error.toString();
+      if (raw.contains('already has active order')) {
+        setState(() => _errorMessage = _i18n.t('active_order_exists'));
+      } else {
+        setState(() => _errorMessage = raw);
+      }
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
@@ -906,6 +953,8 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
   Widget _buildHomeScreen(BuildContext context) {
     final i18n = _i18n;
     final hasDest = _destinationLatLng != null;
+    final hasBlockingActiveOrder =
+        _activeOrder != null && _isBlockingOrderStatus(_activeOrder!.status);
     final gpsOk = _currentLatLng != null && _locationError == null;
     final currentAddress =
         (_currentAddressLabel ?? _pickupController.text.trim()).trim();
@@ -1376,11 +1425,22 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                       const SizedBox(height: 16),
                     ] else
                       const SizedBox(height: 16),
+                    if (hasBlockingActiveOrder) ...[
+                      Text(
+                        i18n.t('active_order_exists'),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: UiKitColors.danger,
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
                     // CTA button
                     FilledButton(
-                      onPressed: hasDest && !_isSubmitting
-                          ? _confirmRideAndRequestDriver
-                          : null,
+                      onPressed:
+                          hasDest && !_isSubmitting && !hasBlockingActiveOrder
+                              ? _confirmRideAndRequestDriver
+                              : null,
                       style: FilledButton.styleFrom(
                         minimumSize: const Size.fromHeight(56),
                         shape: RoundedRectangleBorder(
@@ -1391,9 +1451,11 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                       child: Text(
                         _isSubmitting
                             ? i18n.t('please_wait')
-                            : hasDest
-                                ? i18n.t('confirm_ride')
-                                : i18n.t('where_to'),
+                            : hasBlockingActiveOrder
+                                ? i18n.t('active_order_exists_short')
+                                : hasDest
+                                    ? i18n.t('confirm_ride')
+                                    : i18n.t('where_to'),
                         style: const TextStyle(
                             fontSize: 16, fontWeight: FontWeight.w700),
                       ),

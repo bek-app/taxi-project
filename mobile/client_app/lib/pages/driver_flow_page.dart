@@ -30,6 +30,7 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
   String? _error;
   Position? _currentPosition;
   BackendOrder? _activeOrder;
+  List<BackendOrder> _orders = const [];
   Timer? _ordersPollingTimer;
 
   @override
@@ -108,10 +109,6 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
         unawaited(_updateOwnLocationSilently());
       } else {
         _ordersPollingTimer?.cancel();
-        if (!mounted) return;
-        setState(() {
-          _activeOrder = null;
-        });
       }
     } catch (error) {
       if (!mounted) return;
@@ -186,21 +183,12 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
   Future<void> _refreshOrders({bool showLoader = true}) async {
     Future<void> action() async {
       final orders = await widget.apiClient.listOrders();
-      BackendOrder? candidate;
-
-      for (final order in orders) {
-        if (order.status == 'COMPLETED' || order.status == 'CANCELED') {
-          continue;
-        }
-        if (order.driverId != null && order.driverId!.isNotEmpty) {
-          candidate = order;
-          break;
-        }
-      }
+      final candidate = _pickActiveOrder(orders);
 
       if (!mounted) return;
 
       setState(() {
+        _orders = orders;
         _activeOrder = candidate;
       });
     }
@@ -217,6 +205,34 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
         });
       }
     }
+  }
+
+  bool _isTerminalOrder(BackendOrder order) {
+    return order.status == 'COMPLETED' || order.status == 'CANCELED';
+  }
+
+  BackendOrder? _pickActiveOrder(List<BackendOrder> orders) {
+    final current = _activeOrder;
+    if (current != null && !_isTerminalOrder(current)) {
+      for (final order in orders) {
+        if (order.id == current.id) {
+          return order;
+        }
+      }
+      return current;
+    }
+
+    for (final order in orders) {
+      if (!_isTerminalOrder(order)) {
+        return order;
+      }
+    }
+
+    if (orders.isEmpty) {
+      return null;
+    }
+
+    return orders.first;
   }
 
   Future<void> _acceptRide() async {
@@ -364,6 +380,8 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
                         ),
                       ),
                     ],
+                    const SizedBox(height: 10),
+                    _buildOrdersList(i18n),
                     const SizedBox(height: 12),
                     _buildStatusAction(i18n, order),
                     const SizedBox(height: 8),
@@ -393,6 +411,90 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildOrdersList(AppI18n i18n) {
+    if (_orders.isEmpty) {
+      return Text(
+        i18n.t('orders_list_empty'),
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: UiKitColors.textSecondary,
+            ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          i18n.t('orders_list_title'),
+          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+        ),
+        const SizedBox(height: 6),
+        SizedBox(
+          height: 120,
+          child: ListView.separated(
+            itemCount: _orders.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 6),
+            itemBuilder: (context, index) {
+              final order = _orders[index];
+              final isSelected = _activeOrder?.id == order.id;
+              final isTerminal = _isTerminalOrder(order);
+              final borderColor =
+                  isSelected ? UiKitColors.primary : const Color(0xFFE5E7EB);
+
+              return InkWell(
+                onTap: () => setState(() => _activeOrder = order),
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: borderColor),
+                    color: isSelected
+                        ? const Color(0xFFEFF6FF)
+                        : const Color(0xFFF8FAFC),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '#${order.id.substring(0, 8)}',
+                          style:
+                              Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                        ),
+                      ),
+                      Text(
+                        localizedOrderStatus(widget.lang, order.status),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: isTerminal
+                                  ? UiKitColors.textSecondary
+                                  : UiKitColors.success,
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '${order.finalPrice.toStringAsFixed(0)} ₸',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: UiKitColors.textSecondary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
