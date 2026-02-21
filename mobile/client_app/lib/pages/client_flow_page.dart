@@ -1,10 +1,7 @@
 import 'dart:async';
-import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
 import '../api/taxi_api_client.dart';
@@ -257,16 +254,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     }
   }
 
-  // ── Geocoding (Nominatim) ─────────────────────────────────────────────────
-
-  Map<String, String> _nominatimHeaders() {
-    if (kIsWeb) {
-      return const <String, String>{};
-    }
-    return const <String, String>{
-      'User-Agent': 'TaxiMVP/1.0 (kz.taxi.project)',
-    };
-  }
+  // ── Geocoding (Backend proxy) ─────────────────────────────────────────────
 
   String _preferredLanguageCode() {
     return widget.lang == AppLang.kz ? 'kk,ru,en' : 'ru,kk,en';
@@ -280,21 +268,6 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     return '$query, $city';
   }
 
-  String _shortAddress(String displayName) {
-    final parts = displayName
-        .split(',')
-        .map((item) => item.trim())
-        .where((item) => item.isNotEmpty)
-        .toList(growable: false);
-    if (parts.isEmpty) {
-      return displayName.trim();
-    }
-    if (parts.length == 1) {
-      return parts.first;
-    }
-    return '${parts[0]}, ${parts[1]}';
-  }
-
   String _formatLatLng(LatLng point) {
     return '${point.latitude.toStringAsFixed(5)}, ${point.longitude.toStringAsFixed(5)}';
   }
@@ -304,106 +277,22 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
         (a.longitude - b.longitude).abs() < 0.00001;
   }
 
-  String? _extractCityName(Map<String, dynamic> address) {
-    const cityKeys = <String>[
-      'city',
-      'town',
-      'village',
-      'municipality',
-      'county',
-      'state_district',
-      'state',
-    ];
-
-    for (final key in cityKeys) {
-      final value = (address[key] ?? '').toString().trim();
-      if (value.isNotEmpty) {
-        return value;
-      }
-    }
-    return null;
-  }
-
-  String? _normalizeCityId(String? cityName) {
-    final raw = cityName?.trim().toLowerCase() ?? '';
-    if (raw.isEmpty) {
-      return null;
-    }
-
-    final normalized = raw
-        .replaceAll(',', '')
-        .replaceAll(RegExp(r'\s+'), '_')
-        .replaceAll(RegExp(r'[^a-z0-9_\-\u0400-\u04FF]'), '');
-    if (normalized.isEmpty) {
-      return null;
-    }
-
-    if (normalized.length <= 64) {
-      return normalized;
-    }
-
-    return normalized.substring(0, 64);
-  }
-
-  String? _toNominatimViewBox(dynamic rawBoundingBox) {
-    if (rawBoundingBox is! List || rawBoundingBox.length < 4) {
-      return null;
-    }
-
-    final south = double.tryParse(rawBoundingBox[0].toString());
-    final north = double.tryParse(rawBoundingBox[1].toString());
-    final west = double.tryParse(rawBoundingBox[2].toString());
-    final east = double.tryParse(rawBoundingBox[3].toString());
-    if (south == null || north == null || west == null || east == null) {
-      return null;
-    }
-
-    return '${west.toStringAsFixed(6)},${north.toStringAsFixed(6)},${east.toStringAsFixed(6)},${south.toStringAsFixed(6)}';
-  }
-
   Future<_ReverseGeocodeInfo?> _reverseGeocodeInfo(LatLng point) async {
-    final uri = Uri.https('nominatim.openstreetmap.org', '/reverse', {
-      'lat': point.latitude.toStringAsFixed(6),
-      'lon': point.longitude.toStringAsFixed(6),
-      'format': 'jsonv2',
-      'zoom': '18',
-      'addressdetails': '1',
-      'accept-language': _preferredLanguageCode(),
-    });
-
-    final response = await http.get(uri, headers: _nominatimHeaders());
-    if (response.statusCode != 200) {
-      return null;
-    }
-
-    final decodedRaw = jsonDecode(response.body);
-    if (decodedRaw is! Map) {
-      return null;
-    }
-    final decoded = decodedRaw.map(
-      (key, value) => MapEntry(key.toString(), value),
+    final result = await widget.apiClient.reverseGeocode(
+      latitude: point.latitude,
+      longitude: point.longitude,
+      lang: _preferredLanguageCode(),
     );
-
-    final displayName = (decoded['display_name'] ?? '').toString().trim();
-    final addressRaw = decoded['address'];
-    if (displayName.isEmpty || addressRaw is! Map) {
+    if (result == null) {
       return null;
     }
-    final address = addressRaw.map(
-      (key, value) => MapEntry(key.toString(), value),
-    );
-    final cityName = _extractCityName(address);
-    final cityId = _normalizeCityId(cityName);
-    final viewBox = _toNominatimViewBox(decoded['boundingbox']);
-    final countryCode =
-        (address['country_code'] ?? '').toString().trim().toLowerCase();
 
     return _ReverseGeocodeInfo(
-      shortAddress: _shortAddress(displayName),
-      cityName: cityName,
-      cityId: cityId,
-      cityViewBox: viewBox,
-      countryCode: countryCode.isEmpty ? null : countryCode,
+      shortAddress: result.shortAddress,
+      cityName: result.cityName,
+      cityId: result.cityId,
+      cityViewBox: result.cityViewBox,
+      countryCode: result.countryCode,
     );
   }
 
@@ -569,43 +458,24 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     if (!mounted) return;
     setState(() => _isSearching = true);
     try {
-      final queryParameters = <String, String>{
-        'q': _cityScopedQuery(query),
-        'format': 'jsonv2',
-        'limit': '5',
-        'accept-language': _preferredLanguageCode(),
-      };
-
       final countryCode = _currentCountryCode?.trim().toLowerCase();
-      if (countryCode != null && countryCode.length == 2) {
-        queryParameters['countrycodes'] = countryCode;
-      }
-
       final viewBox = _currentCityViewBox?.trim();
-      if (viewBox != null && viewBox.isNotEmpty) {
-        queryParameters['viewbox'] = viewBox;
-      }
-
-      final uri =
-          Uri.https('nominatim.openstreetmap.org', '/search', queryParameters);
-      final response = await http.get(uri, headers: _nominatimHeaders());
+      final list = await widget.apiClient.searchGeocode(
+        query: _cityScopedQuery(query),
+        limit: 5,
+        lang: _preferredLanguageCode(),
+        countryCode: countryCode,
+        viewBox: viewBox,
+      );
       if (!mounted) return;
-      if (response.statusCode == 200) {
-        final list = jsonDecode(response.body) as List;
-        setState(() {
-          _suggestions = list
-              .map((item) => _GeoSuggestion(
-                    displayName: item['display_name'] as String,
-                    latLng: LatLng(
-                      double.parse(item['lat'] as String),
-                      double.parse(item['lon'] as String),
-                    ),
-                  ))
-              .toList();
-        });
-      } else {
-        setState(() => _suggestions = []);
-      }
+      setState(() {
+        _suggestions = list
+            .map((item) => _GeoSuggestion(
+                  displayName: item.displayName,
+                  latLng: LatLng(item.latitude, item.longitude),
+                ))
+            .toList(growable: false);
+      });
     } catch (_) {
       if (!mounted) return;
       setState(() => _suggestions = []);

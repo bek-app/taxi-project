@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import '../models/app_role.dart';
 import '../models/auth_session.dart';
 import '../models/backend_order.dart';
+import '../models/geocode_result.dart';
 import '../models/nearby_driver.dart';
 import '../models/route_snapshot.dart';
 
@@ -137,6 +138,77 @@ class TaxiApiClient {
     final encoded = Uri.encodeQueryComponent(coordinates.join(';'));
     final response = await _get('/routing/route?coordinates=$encoded');
     return RouteSnapshot.fromJson(_decodeAsMap(response));
+  }
+
+  Future<List<GeocodeSuggestionResult>> searchGeocode({
+    required String query,
+    int limit = 5,
+    String? lang,
+    String? countryCode,
+    String? viewBox,
+  }) async {
+    final params = <String, String>{
+      'q': query,
+      'limit': limit.toString(),
+    };
+    if (lang != null && lang.trim().isNotEmpty) {
+      params['lang'] = lang.trim();
+    }
+    if (countryCode != null && countryCode.trim().isNotEmpty) {
+      params['countryCode'] = countryCode.trim().toLowerCase();
+    }
+    if (viewBox != null && viewBox.trim().isNotEmpty) {
+      params['viewBox'] = viewBox.trim();
+    }
+
+    final uri = Uri.parse('$baseUrl/routing/geocode/search').replace(
+      queryParameters: params,
+    );
+    final response = await _client.get(
+      uri,
+      headers: _headers(includeAuth: false),
+    );
+    final decoded = _decodeAsList(response);
+    return decoded
+        .map(GeocodeSuggestionResult.fromJson)
+        .toList(growable: false);
+  }
+
+  Future<ReverseGeocodeResult?> reverseGeocode({
+    required double latitude,
+    required double longitude,
+    String? lang,
+  }) async {
+    final params = <String, String>{
+      'latitude': latitude.toStringAsFixed(6),
+      'longitude': longitude.toStringAsFixed(6),
+    };
+    if (lang != null && lang.trim().isNotEmpty) {
+      params['lang'] = lang.trim();
+    }
+
+    final uri = Uri.parse('$baseUrl/routing/geocode/reverse').replace(
+      queryParameters: params,
+    );
+    final response = await _client.get(
+      uri,
+      headers: _headers(includeAuth: false),
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('API ${response.statusCode}: ${response.body}');
+    }
+
+    final raw = response.body.trim();
+    if (raw == 'null' || raw.isEmpty) {
+      return null;
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw Exception('Unexpected reverse geocode response: ${response.body}');
+    }
+
+    return ReverseGeocodeResult.fromJson(decoded);
   }
 
   Future<BackendOrder> searchDriver(String orderId) async {

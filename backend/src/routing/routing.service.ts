@@ -13,6 +13,21 @@ interface CacheEntry {
   value: Omit<RouteResponse, 'fromCache'>;
 }
 
+export interface GeocodeSuggestion {
+  displayName: string;
+  latitude: number;
+  longitude: number;
+}
+
+export interface ReverseGeocodeResult {
+  displayName: string;
+  shortAddress: string;
+  cityName: string | null;
+  cityId: string | null;
+  cityViewBox: string | null;
+  countryCode: string | null;
+}
+
 @Injectable()
 export class RoutingService {
   private readonly cache = new Map<string, CacheEntry>();
@@ -46,6 +61,114 @@ export class RoutingService {
     } finally {
       this.inflight.delete(cacheKey);
     }
+  }
+
+  async searchGeocode(
+    query: string,
+    options?: {
+      limit?: number;
+      lang?: string;
+      countryCode?: string;
+      viewBox?: string;
+    },
+  ): Promise<GeocodeSuggestion[]> {
+    const q = query.trim();
+    if (q.length < 2) {
+      throw new BadRequestException('q must be at least 2 characters');
+    }
+
+    const baseUrl = this.configService.get<string>(
+      'GEOCODING_PROVIDER_URL',
+      'https://nominatim.openstreetmap.org',
+    );
+    const url = new URL('/search', baseUrl);
+    url.searchParams.set('q', q);
+    url.searchParams.set('format', 'jsonv2');
+    url.searchParams.set('addressdetails', '1');
+    url.searchParams.set('limit', String(options?.limit ?? 5));
+    url.searchParams.set('accept-language', options?.lang?.trim() || 'ru,kk,en');
+
+    const countryCode = options?.countryCode?.trim().toLowerCase();
+    if (countryCode && countryCode.length === 2) {
+      url.searchParams.set('countrycodes', countryCode);
+    }
+
+    const viewBox = options?.viewBox?.trim();
+    if (viewBox) {
+      url.searchParams.set('viewbox', viewBox);
+    }
+
+    const json = await this.fetchJsonFromProvider(url);
+    if (!Array.isArray(json)) {
+      throw new ServiceUnavailableException('Geocoding provider returned invalid search response');
+    }
+
+    const suggestions: GeocodeSuggestion[] = [];
+    for (const item of json) {
+      if (!item || typeof item !== 'object') {
+        continue;
+      }
+      const payload = item as Record<string, unknown>;
+      const displayName = String(payload['display_name'] ?? '').trim();
+      const latitude = Number(payload['lat']);
+      const longitude = Number(payload['lon']);
+      if (!displayName || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        continue;
+      }
+      suggestions.push({
+        displayName,
+        latitude: Number(latitude.toFixed(6)),
+        longitude: Number(longitude.toFixed(6)),
+      });
+    }
+
+    return suggestions;
+  }
+
+  async reverseGeocode(
+    latitude: number,
+    longitude: number,
+    lang?: string,
+  ): Promise<ReverseGeocodeResult | null> {
+    const baseUrl = this.configService.get<string>(
+      'GEOCODING_PROVIDER_URL',
+      'https://nominatim.openstreetmap.org',
+    );
+    const url = new URL('/reverse', baseUrl);
+    url.searchParams.set('lat', latitude.toFixed(6));
+    url.searchParams.set('lon', longitude.toFixed(6));
+    url.searchParams.set('format', 'jsonv2');
+    url.searchParams.set('zoom', '18');
+    url.searchParams.set('addressdetails', '1');
+    url.searchParams.set('accept-language', lang?.trim() || 'ru,kk,en');
+
+    const json = await this.fetchJsonFromProvider(url);
+    if (!json || typeof json !== 'object') {
+      throw new ServiceUnavailableException('Geocoding provider returned invalid reverse response');
+    }
+
+    const payload = json as Record<string, unknown>;
+    const displayName = String(payload['display_name'] ?? '').trim();
+    const addressRaw = payload['address'];
+    if (!displayName || !addressRaw || typeof addressRaw !== 'object') {
+      return null;
+    }
+
+    const address = addressRaw as Record<string, unknown>;
+    const cityName = this.extractCityName(address);
+    const cityId = this.normalizeCityId(cityName);
+    const cityViewBox = this.toNominatimViewBox(payload['boundingbox']);
+    const countryCodeRaw = String(address['country_code'] ?? '').trim().toLowerCase();
+    const countryCode = countryCodeRaw.length === 2 ? countryCodeRaw : null;
+
+    return {
+      displayName,
+      shortAddress: this.shortAddress(displayName),
+      cityName,
+      cityId,
+      cityViewBox,
+      countryCode,
+    };
   }
 
   private async fetchAndCacheRoute(
@@ -142,6 +265,114 @@ export class RoutingService {
       durationMinutes: Number((durationSeconds / 60).toFixed(1)),
       geometry,
     };
+  }
+
+  private async fetchJsonFromProvider(url: URL): Promise<unknown> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs);
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'GET',
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'TaxiMVP/1.0 (backend geocoding proxy)',
+          Accept: 'application/json',
+        },
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new GatewayTimeoutException('Geocoding provider timeout');
+      }
+      throw new ServiceUnavailableException('Geocoding provider unavailable');
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (!response.ok) {
+      throw new ServiceUnavailableException(`Geocoding provider error: ${response.status}`);
+    }
+
+    return response.json();
+  }
+
+  private shortAddress(displayName: string): string {
+    const parts = displayName
+      .split(',')
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+
+    if (parts.length === 0) {
+      return displayName.trim();
+    }
+    if (parts.length === 1) {
+      return parts[0];
+    }
+    return `${parts[0]}, ${parts[1]}`;
+  }
+
+  private extractCityName(address: Record<string, unknown>): string | null {
+    const cityKeys = [
+      'city',
+      'town',
+      'village',
+      'municipality',
+      'county',
+      'state_district',
+      'state',
+    ];
+
+    for (const key of cityKeys) {
+      const value = String(address[key] ?? '').trim();
+      if (value) {
+        return value;
+      }
+    }
+
+    return null;
+  }
+
+  private normalizeCityId(cityName: string | null): string | null {
+    const raw = cityName?.trim().toLowerCase() ?? '';
+    if (!raw) {
+      return null;
+    }
+
+    const normalized = raw
+      .replaceAll(',', '')
+      .replace(/\s+/g, '_')
+      .replace(/[^a-z0-9_\-\u0400-\u04FF]/g, '');
+
+    if (!normalized) {
+      return null;
+    }
+
+    if (normalized.length <= 64) {
+      return normalized;
+    }
+    return normalized.slice(0, 64);
+  }
+
+  private toNominatimViewBox(rawBoundingBox: unknown): string | null {
+    if (!Array.isArray(rawBoundingBox) || rawBoundingBox.length < 4) {
+      return null;
+    }
+
+    const south = Number(rawBoundingBox[0]);
+    const north = Number(rawBoundingBox[1]);
+    const west = Number(rawBoundingBox[2]);
+    const east = Number(rawBoundingBox[3]);
+    if (
+      !Number.isFinite(south) ||
+      !Number.isFinite(north) ||
+      !Number.isFinite(west) ||
+      !Number.isFinite(east)
+    ) {
+      return null;
+    }
+
+    return `${west.toFixed(6)},${north.toFixed(6)},${east.toFixed(6)},${south.toFixed(6)}`;
   }
 
   private parseCoordinates(input: string): RoutePoint[] {
