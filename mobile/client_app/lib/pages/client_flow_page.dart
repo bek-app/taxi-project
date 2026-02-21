@@ -78,6 +78,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
   String? _routeKey;
   bool _isReverseGeocodingPickup = false;
   int _pickupGeocodeToken = 0;
+  int _pickupOverrideGeocodeToken = 0;
   int _destinationGeocodeToken = 0;
   List<LatLng> _nearbyOnlineDriverPoints = const [];
   String? _currentCityName;
@@ -423,7 +424,74 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     } catch (_) {}
   }
 
-  void _onMapTapped(LatLng point) {
+  void _setPickupFromMap(LatLng point) {
+    final formatted = _formatLatLng(point);
+    setState(() {
+      _pickupOverrideLatLng = point;
+      _pickupController.text = formatted;
+      _suggestions = [];
+      _activeSearch = _ActiveSearch.none;
+    });
+    FocusManager.instance.primaryFocus?.unfocus();
+    _scheduleRouteRefresh();
+    unawaited(_resolvePickupOverrideAddress(point));
+  }
+
+  Future<void> _resolvePickupOverrideAddress(LatLng point) async {
+    final token = ++_pickupOverrideGeocodeToken;
+    try {
+      final info = await _reverseGeocodeInfo(point);
+      if (!mounted || token != _pickupOverrideGeocodeToken) {
+        return;
+      }
+      final current = _pickupOverrideLatLng;
+      if (current == null || !_isSamePoint(current, point)) {
+        return;
+      }
+      final label = info?.shortAddress;
+      setState(() {
+        _pickupController.text =
+            (label == null || label.isEmpty) ? _formatLatLng(point) : label;
+
+        final cityName = info?.cityName?.trim();
+        if (cityName != null && cityName.isNotEmpty) {
+          _currentCityName = cityName;
+          _currentCityId = info?.cityId;
+          _currentCityViewBox = info?.cityViewBox;
+        }
+
+        final countryCode = info?.countryCode?.trim().toLowerCase();
+        if (countryCode != null && countryCode.length == 2) {
+          _currentCountryCode = countryCode;
+        }
+      });
+    } catch (_) {
+      if (!mounted || token != _pickupOverrideGeocodeToken) {
+        return;
+      }
+      final current = _pickupOverrideLatLng;
+      if (current == null || !_isSamePoint(current, point)) {
+        return;
+      }
+      setState(() {
+        _pickupController.text = _formatLatLng(point);
+      });
+    }
+  }
+
+  void _onPickupMarkerDragged(LatLng point) {
+    _setPickupFromMap(point);
+  }
+
+  void _onPickupMarkerTapped(LatLng point) {
+    _setPickupFromMap(point);
+  }
+
+  void _onCurrentLocationMarkerTapped(LatLng point) {
+    _setPickupFromMap(point);
+  }
+
+  void _setDestinationFromMap(LatLng point) {
     final formatted = _formatLatLng(point);
     setState(() {
       _destinationLatLng = point;
@@ -435,6 +503,14 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     FocusManager.instance.primaryFocus?.unfocus();
     _scheduleRouteRefresh();
     unawaited(_resolveDestinationAddress(point));
+  }
+
+  void _onMapTapped(LatLng point) {
+    if (_activeSearch == _ActiveSearch.pickup) {
+      _setPickupFromMap(point);
+      return;
+    }
+    _setDestinationFromMap(point);
   }
 
   void _onPickupChanged(String value) {
@@ -517,6 +593,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
       _pickupController.clear();
       _suggestions = [];
     });
+    _pickupOverrideGeocodeToken++;
     _autofillPickupFromCurrentLocation(force: true);
     _scheduleRouteRefresh();
   }
@@ -955,7 +1032,11 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     final hasDest = _destinationLatLng != null;
     final hasBlockingActiveOrder =
         _activeOrder != null && _isBlockingOrderStatus(_activeOrder!.status);
+    final allowPickupEdit = !hasBlockingActiveOrder;
     final gpsOk = _currentLatLng != null && _locationError == null;
+    final mapTapHintText = _activeSearch == _ActiveSearch.pickup
+        ? i18n.t('map_pickup_hint')
+        : i18n.t('map_tap_hint');
     final currentAddress =
         (_currentAddressLabel ?? _pickupController.text.trim()).trim();
     final currentCity = (_currentCityName?.trim().isNotEmpty ?? false)
@@ -969,11 +1050,16 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
           Positioned.fill(
             child: MapBackdrop(
               currentLocation: _currentLatLng,
-              pickupPoint: _currentLatLng ?? _fallbackPickup,
+              pickupPoint: _pickupPoint,
               dropoffPoint: hasDest ? _destinationLatLng : null,
               routePolylinePoints: hasDest ? _routePolylinePoints : null,
               nearbyDriverPoints: _nearbyOnlineDriverPoints,
               onMapTap: _step == ClientFlowStep.home ? _onMapTapped : null,
+              pickupDraggable: allowPickupEdit,
+              onPickupDragEnd: allowPickupEdit ? _onPickupMarkerDragged : null,
+              onPickupTap: allowPickupEdit ? _onPickupMarkerTapped : null,
+              onCurrentLocationTap:
+                  allowPickupEdit ? _onCurrentLocationMarkerTapped : null,
             ),
           ),
 
@@ -1288,7 +1374,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                     if (!hasDest) ...[
                       const SizedBox(height: 10),
                       Text(
-                        i18n.t('map_tap_hint'),
+                        mapTapHintText,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: UiKitColors.textSecondary,
                             ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter_map_dragmarker/flutter_map_dragmarker.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../core/colors.dart';
@@ -13,6 +14,10 @@ class MapBackdrop extends StatefulWidget {
     this.routePolylinePoints,
     this.nearbyDriverPoints,
     this.onMapTap,
+    this.onPickupDragEnd,
+    this.onPickupTap,
+    this.onCurrentLocationTap,
+    this.pickupDraggable = false,
     super.key,
   });
 
@@ -25,6 +30,10 @@ class MapBackdrop extends StatefulWidget {
   final List<LatLng>? routePolylinePoints;
   final List<LatLng>? nearbyDriverPoints;
   final ValueChanged<LatLng>? onMapTap;
+  final ValueChanged<LatLng>? onPickupDragEnd;
+  final ValueChanged<LatLng>? onPickupTap;
+  final ValueChanged<LatLng>? onCurrentLocationTap;
+  final bool pickupDraggable;
 
   @override
   State<MapBackdrop> createState() => _MapBackdropState();
@@ -83,25 +92,52 @@ class _MapBackdropState extends State<MapBackdrop> {
         ? fromBackend
         : _fallbackPolylinePoints();
 
+    final dragMarkers = <DragMarker>[
+      if (widget.pickupPoint != null && widget.pickupDraggable)
+        DragMarker(
+          point: widget.pickupPoint!,
+          size: const Size(42, 42),
+          useLongPress: false,
+          onTap: (point) => widget.onPickupTap?.call(point),
+          onDragEnd: (details, point) => widget.onPickupDragEnd?.call(point),
+          builder: (context, point, isDragging) {
+            return Opacity(
+              opacity: isDragging ? 0.85 : 1.0,
+              child: const MapPin(
+                icon: Icons.trip_origin,
+                color: Color(0xFF0284C7),
+              ),
+            );
+          },
+        ),
+    ];
+
     final markers = <Marker>[
       if (widget.currentLocation != null)
         Marker(
           point: widget.currentLocation!,
           width: 42,
           height: 42,
-          child: const MapPin(
-            icon: Icons.my_location_rounded,
-            color: Color(0xFF0EA5E9),
+          child: GestureDetector(
+            onTap: () =>
+                widget.onCurrentLocationTap?.call(widget.currentLocation!),
+            child: const MapPin(
+              icon: Icons.my_location_rounded,
+              color: Color(0xFF0EA5E9),
+            ),
           ),
         ),
-      if (widget.pickupPoint != null)
+      if (widget.pickupPoint != null && !widget.pickupDraggable)
         Marker(
           point: widget.pickupPoint!,
           width: 42,
           height: 42,
-          child: const MapPin(
-            icon: Icons.trip_origin,
-            color: Color(0xFF0284C7),
+          child: GestureDetector(
+            onTap: () => widget.onPickupTap?.call(widget.pickupPoint!),
+            child: const MapPin(
+              icon: Icons.trip_origin,
+              color: Color(0xFF0284C7),
+            ),
           ),
         ),
       if (widget.driverPoint != null)
@@ -162,6 +198,7 @@ class _MapBackdropState extends State<MapBackdrop> {
                 ],
               ),
             if (markers.isNotEmpty) MarkerLayer(markers: markers),
+            if (dragMarkers.isNotEmpty) DragMarkers(markers: dragMarkers),
           ],
         ),
         const Positioned(
