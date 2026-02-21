@@ -23,7 +23,8 @@ flutter run -d web-server --web-hostname 127.0.0.1 --web-port 5050 --dart-define
 
 ## Auth login
 
-Single app алдымен login экранын ашады (`Taxi Auth Login`).
+Single app алдымен login экранын ашады (`Taxi Super App`).
+Login бетінде және қолданба ішінде жоғарғы панельде `KZ/RU` тіл ауыстырғыш бар.
 
 Demo credentials:
 
@@ -35,5 +36,5 @@ Demo credentials:
 
 `client_app` ішінде экранның жоғарғы оң жағындағы switch арқылы рөлді ауыстыруға болады:
 
-- `Client`
-- `Driver`
+- `Жолаушы/Клиент`
+- `Жүргізуші/Водитель`
