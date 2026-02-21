@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 
@@ -26,11 +28,18 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
   String? _error;
   Position? _currentPosition;
   BackendOrder? _activeOrder;
+  Timer? _ordersPollingTimer;
 
   @override
   void initState() {
     super.initState();
     _refreshOrders();
+  }
+
+  @override
+  void dispose() {
+    _ordersPollingTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _runWithLoader(Future<void> Function() action) async {
@@ -68,14 +77,29 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
       });
 
       if (value) {
+        _startOrdersPolling();
         await _refreshOrders(showLoader: false);
       } else {
+        _ordersPollingTimer?.cancel();
         if (!mounted) return;
         setState(() {
           _activeOrder = null;
         });
       }
     });
+  }
+
+  void _startOrdersPolling() {
+    _ordersPollingTimer?.cancel();
+    _ordersPollingTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) {
+        if (!_online || _busy) {
+          return;
+        }
+        unawaited(_refreshOrders(showLoader: false));
+      },
+    );
   }
 
   Future<void> _updateOwnLocation() async {
@@ -117,8 +141,10 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
         if (order.status == 'COMPLETED' || order.status == 'CANCELED') {
           continue;
         }
-        candidate = order;
-        break;
+        if (order.driverId != null && order.driverId!.isNotEmpty) {
+          candidate = order;
+          break;
+        }
       }
 
       if (!mounted) return;
@@ -140,11 +166,10 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
     if (order == null) return;
 
     await _runWithLoader(() async {
-      BackendOrder next = order;
-      if (order.status == 'SEARCHING_DRIVER' || order.status == 'CREATED') {
-        next = await widget.apiClient.searchDriver(order.id);
-      }
-
+      final next = await widget.apiClient.updateOrderStatus(
+        order.id,
+        'DRIVER_ARRIVING',
+      );
       if (!mounted) return;
 
       setState(() {
@@ -170,10 +195,7 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
   Widget build(BuildContext context) {
     final i18n = AppI18n(widget.lang);
     final order = _activeOrder;
-    final canAccept = _online &&
-        order != null &&
-        (order.status == 'SEARCHING_DRIVER' || order.status == 'CREATED');
-    final canArriving =
+    final canAccept =
         _online && order != null && order.status == 'DRIVER_ASSIGNED';
     final canStart =
         _online && order != null && order.status == 'DRIVER_ARRIVING';
@@ -267,13 +289,6 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
           FilledButton(
             onPressed: _busy || !canAccept ? null : _acceptRide,
             child: Text(i18n.t('accept_ride')),
-          ),
-          const SizedBox(height: 8),
-          FilledButton.tonal(
-            onPressed: _busy || !canArriving
-                ? null
-                : () => _updateStatus('DRIVER_ARRIVING'),
-            child: Text(i18n.t('set_arriving')),
           ),
           const SizedBox(height: 8),
           FilledButton.tonal(

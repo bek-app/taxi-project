@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { RedisGeoService } from '../geo/redis-geo.service';
+import { NearbyDriverLocation, RedisGeoService } from '../geo/redis-geo.service';
 
 @Injectable()
 export class DriversService {
@@ -11,5 +11,19 @@ export class DriversService {
 
   async setAvailability(driverId: string, online: boolean): Promise<void> {
     await this.redisGeoService.setDriverAvailability(driverId, online);
+  }
+
+  async listNearbyAvailableDrivers(
+    latitude: number,
+    longitude: number,
+    radiusKm: number,
+    limit: number,
+  ): Promise<NearbyDriverLocation[]> {
+    return this.redisGeoService.findNearbyAvailableDriverLocations(
+      latitude,
+      longitude,
+      radiusKm,
+      limit,
+    );
   }
 }

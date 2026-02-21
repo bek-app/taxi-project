@@ -2,15 +2,18 @@ import {
   Body,
   Controller,
   ForbiddenException,
+  Get,
   Param,
   Patch,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { AuthUser } from '../auth/types/auth-user.type';
 import { UserRole } from '../auth/user-role.enum';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { ListNearbyDriversDto } from './dto/list-nearby-drivers.dto';
 import { SetDriverAvailabilityDto } from './dto/set-driver-availability.dto';
 import { UpdateDriverLocationDto } from './dto/update-driver-location.dto';
 import { DriversService } from './drivers.service';
@@ -21,6 +24,34 @@ import { DriversService } from './drivers.service';
 @Controller('drivers')
 export class DriversController {
   constructor(private readonly driversService: DriversService) {}
+
+  @Get('nearby')
+  @ApiOkResponse({
+    schema: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          driverId: { type: 'string', example: '9e9b8d6d-6fef-4f55-8b67-6e4f8e8df4f9' },
+          latitude: { type: 'number', example: 43.24123 },
+          longitude: { type: 'number', example: 76.90123 },
+          distanceKm: { type: 'number', example: 1.235 },
+        },
+      },
+    },
+  })
+  async listNearby(
+    @Query() query: ListNearbyDriversDto,
+  ): Promise<Array<{ driverId: string; latitude: number; longitude: number; distanceKm: number }>> {
+    const radiusKm = query.radiusKm ?? 5;
+    const limit = query.limit ?? 20;
+    return this.driversService.listNearbyAvailableDrivers(
+      query.latitude,
+      query.longitude,
+      radiusKm,
+      limit,
+    );
+  }
 
   @Patch('me/location')
   async updateMyLocation(

@@ -1,6 +1,13 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { AuthUser } from '../auth/types/auth-user.type';
+import { UserRole } from '../auth/user-role.enum';
 import { MatchmakingService } from '../matchmaking/matchmaking.service';
 import { PricingService } from '../pricing/pricing.service';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -20,14 +27,32 @@ export class OrdersService {
     private readonly orderEventsGateway: OrderEventsGateway,
   ) {}
 
-  async listOrders(): Promise<Order[]> {
-    return this.orderRepository.find({ order: { createdAt: 'DESC' } });
+  async listOrders(user: AuthUser): Promise<Order[]> {
+    if (user.role === UserRole.ADMIN) {
+      return this.orderRepository.find({ order: { createdAt: 'DESC' } });
+    }
+
+    if (user.role === UserRole.CLIENT) {
+      return this.orderRepository.find({
+        where: { passengerId: user.userId },
+        order: { createdAt: 'DESC' },
+      });
+    }
+
+    return this.orderRepository.find({
+      where: { driverId: user.userId },
+      order: { createdAt: 'DESC' },
+    });
   }
 
-  async getOrderById(orderId: string): Promise<Order> {
+  async getOrderById(orderId: string, user?: AuthUser): Promise<Order> {
     const order = await this.orderRepository.findOne({ where: { id: orderId } });
     if (!order) {
       throw new NotFoundException(`Order not found: ${orderId}`);
+    }
+
+    if (user) {
+      this.assertCanViewOrder(user, order);
     }
 
     return order;
@@ -72,8 +97,9 @@ export class OrdersService {
     return saved;
   }
 
-  async searchDriver(orderId: string): Promise<Order> {
+  async searchDriver(orderId: string, user: AuthUser): Promise<Order> {
     const order = await this.getOrderById(orderId);
+    this.assertCanSearchDriver(user, order);
 
     if (order.status === OrderStatus.CREATED) {
       order.status = OrderStatus.SEARCHING_DRIVER;
@@ -97,9 +123,14 @@ export class OrdersService {
     return saved;
   }
 
-  async updateOrderStatus(orderId: string, dto: UpdateOrderStatusDto): Promise<Order> {
+  async updateOrderStatus(
+    orderId: string,
+    dto: UpdateOrderStatusDto,
+    user: AuthUser,
+  ): Promise<Order> {
     const order = await this.getOrderById(orderId);
     const nextStatus = dto.status;
+    this.assertCanUpdateStatus(user, order, nextStatus);
 
     if (!isTransitionAllowed(order.status, nextStatus)) {
       throw new BadRequestException(
@@ -114,6 +145,10 @@ export class OrdersService {
     order.status = nextStatus;
     const saved = await this.orderRepository.save(order);
 
+    if (saved.driverId && saved.status === OrderStatus.DRIVER_ARRIVING) {
+      await this.matchmakingService.setDriverBusy(saved.driverId, true);
+    }
+
     if (
       saved.driverId &&
       (saved.status === OrderStatus.CANCELED || saved.status === OrderStatus.COMPLETED)
@@ -123,5 +158,81 @@ export class OrdersService {
 
     this.orderEventsGateway.emitOrderUpdated(saved);
     return saved;
+  }
+
+  private assertCanViewOrder(user: AuthUser, order: Order): void {
+    if (user.role === UserRole.ADMIN) {
+      return;
+    }
+
+    if (user.role === UserRole.CLIENT && order.passengerId === user.userId) {
+      return;
+    }
+
+    if (user.role === UserRole.DRIVER && order.driverId === user.userId) {
+      return;
+    }
+
+    throw new ForbiddenException('You do not have access to this order');
+  }
+
+  private assertCanSearchDriver(user: AuthUser, order: Order): void {
+    if (user.role === UserRole.ADMIN) {
+      return;
+    }
+
+    if (user.role !== UserRole.CLIENT) {
+      throw new ForbiddenException('Only client or admin can request matchmaking');
+    }
+
+    if (order.passengerId !== user.userId) {
+      throw new ForbiddenException('You can search driver only for your own order');
+    }
+  }
+
+  private assertCanUpdateStatus(
+    user: AuthUser,
+    order: Order,
+    nextStatus: OrderStatus,
+  ): void {
+    if (user.role === UserRole.ADMIN) {
+      return;
+    }
+
+    const driverOnlyStatuses = new Set<OrderStatus>([
+      OrderStatus.DRIVER_ARRIVING,
+      OrderStatus.IN_PROGRESS,
+      OrderStatus.COMPLETED,
+    ]);
+
+    if (driverOnlyStatuses.has(nextStatus)) {
+      if (user.role !== UserRole.DRIVER) {
+        throw new ForbiddenException('Only driver can perform this status transition');
+      }
+      if (!order.driverId || order.driverId !== user.userId) {
+        throw new ForbiddenException('Only assigned driver can update this order');
+      }
+      return;
+    }
+
+    if (nextStatus === OrderStatus.CANCELED) {
+      const isPassenger = user.role === UserRole.CLIENT && order.passengerId === user.userId;
+      const isAssignedDriver =
+        user.role === UserRole.DRIVER &&
+        order.driverId !== null &&
+        order.driverId === user.userId;
+      if (!isPassenger && !isAssignedDriver) {
+        throw new ForbiddenException('Only passenger or assigned driver can cancel this order');
+      }
+      return;
+    }
+
+    if (nextStatus === OrderStatus.DRIVER_ASSIGNED) {
+      throw new ForbiddenException('DRIVER_ASSIGNED is managed by matchmaking');
+    }
+
+    if (nextStatus === OrderStatus.SEARCHING_DRIVER) {
+      throw new ForbiddenException('SEARCHING_DRIVER is managed by matchmaking');
+    }
   }
 }

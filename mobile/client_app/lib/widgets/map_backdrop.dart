@@ -11,6 +11,7 @@ class MapBackdrop extends StatefulWidget {
     this.dropoffPoint,
     this.driverPoint,
     this.routePolylinePoints,
+    this.nearbyDriverPoints,
     this.onMapTap,
     super.key,
   });
@@ -22,6 +23,7 @@ class MapBackdrop extends StatefulWidget {
   final LatLng? dropoffPoint;
   final LatLng? driverPoint;
   final List<LatLng>? routePolylinePoints;
+  final List<LatLng>? nearbyDriverPoints;
   final ValueChanged<LatLng>? onMapTap;
 
   @override
@@ -112,6 +114,17 @@ class _MapBackdropState extends State<MapBackdrop> {
             color: UiKitColors.primary,
           ),
         ),
+      ...?widget.nearbyDriverPoints?.map(
+        (point) => Marker(
+          point: point,
+          width: 34,
+          height: 34,
+          child: const MapPin(
+            icon: Icons.local_taxi_outlined,
+            color: Color(0xFFF59E0B),
+          ),
+        ),
+      ),
       if (widget.dropoffPoint != null)
         Marker(
           point: widget.dropoffPoint!,

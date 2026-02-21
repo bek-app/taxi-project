@@ -38,6 +38,9 @@ class ClientFlowPage extends StatefulWidget {
 class _ClientFlowPageState extends State<ClientFlowPage> {
   static const _fallbackPickup = LatLng(43.238949, 76.889709);
   static const _fallbackDropoff = LatLng(43.252600, 76.926400);
+  static const _activeCityId = 'almaty';
+  static const _activeCityQueryName = 'Almaty';
+  static const _activeCityViewBox = '76.70,43.42,77.15,43.10';
   static const _baseFare = 500.0;
   static const _perKm = 120.0;
   static const _perMinute = 25.0;
@@ -52,6 +55,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
   int _rating = 5;
   bool _isSubmitting = false;
   bool _isLocating = false;
+  bool _isDriverSearchInFlight = false;
   String? _locationError;
   String? _errorMessage;
   BackendOrder? _activeOrder;
@@ -72,6 +76,8 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
   String? _destinationName;
   _ActiveSearch _activeSearch = _ActiveSearch.none;
   Timer? _routeDebounce;
+  Timer? _orderPollingTimer;
+  Timer? _nearbyDriversTimer;
   RouteSnapshot? _routeSnapshot;
   bool _isRouteLoading = false;
   bool _isRouteFallback = false;
@@ -79,6 +85,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
   bool _isReverseGeocodingPickup = false;
   int _pickupGeocodeToken = 0;
   int _destinationGeocodeToken = 0;
+  List<LatLng> _nearbyOnlineDriverPoints = const [];
 
   LatLng? get _currentLatLng {
     final p = _currentPosition;
@@ -155,6 +162,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
   void initState() {
     super.initState();
     _refreshCurrentLocation();
+    _startNearbyDriversPolling();
     _scheduleRouteRefresh(delay: Duration.zero);
   }
 
@@ -165,6 +173,8 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     _searchController.dispose();
     _debounce?.cancel();
     _routeDebounce?.cancel();
+    _orderPollingTimer?.cancel();
+    _nearbyDriversTimer?.cancel();
     super.dispose();
   }
 
@@ -224,6 +234,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
           });
           _autofillPickupFromCurrentLocation();
           _scheduleRouteRefresh();
+          _refreshNearbyDrivers();
         },
         onError: (_) {
           if (!mounted) return;
@@ -255,6 +266,10 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
 
   String _preferredLanguageCode() {
     return widget.lang == AppLang.kz ? 'kk,ru,en' : 'ru,kk,en';
+  }
+
+  String _cityScopedQuery(String query) {
+    return '$query, $_activeCityQueryName';
   }
 
   String _shortAddress(String displayName) {
@@ -425,11 +440,13 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     setState(() => _isSearching = true);
     try {
       final uri = Uri.https('nominatim.openstreetmap.org', '/search', {
-        'q': query,
+        'q': _cityScopedQuery(query),
         'format': 'json',
         'limit': '5',
         'countrycodes': 'kz',
         'accept-language': _preferredLanguageCode(),
+        'viewbox': _activeCityViewBox,
+        'bounded': '1',
       });
       final response = await http.get(uri, headers: _nominatimHeaders());
       if (!mounted) return;
@@ -498,6 +515,134 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     });
     _destinationGeocodeToken++;
     _scheduleRouteRefresh();
+  }
+
+  // ── Online drivers / order polling ───────────────────────────────────────
+
+  void _startNearbyDriversPolling() {
+    _nearbyDriversTimer?.cancel();
+    _nearbyDriversTimer = Timer.periodic(
+      const Duration(seconds: 8),
+      (_) => _refreshNearbyDrivers(),
+    );
+  }
+
+  Future<void> _refreshNearbyDrivers() async {
+    final current = _currentLatLng;
+    if (current == null || _step != ClientFlowStep.home) {
+      if (!mounted) return;
+      if (_nearbyOnlineDriverPoints.isNotEmpty) {
+        setState(() => _nearbyOnlineDriverPoints = const []);
+      }
+      return;
+    }
+
+    try {
+      final nearby = await widget.apiClient.listNearbyDrivers(
+        latitude: current.latitude,
+        longitude: current.longitude,
+        radiusKm: 5,
+        limit: 20,
+      );
+      if (!mounted || _step != ClientFlowStep.home) return;
+      setState(() {
+        _nearbyOnlineDriverPoints = nearby
+            .map((item) => LatLng(item.latitude, item.longitude))
+            .toList(growable: false);
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _nearbyOnlineDriverPoints = const []);
+    }
+  }
+
+  void _startOrderPolling() {
+    _orderPollingTimer?.cancel();
+    _orderPollingTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) {
+        final status = _activeOrder?.status;
+        if (status == 'SEARCHING_DRIVER') {
+          _searchDriverForCurrentOrder(
+            showLoader: false,
+            showNotFoundError: false,
+          );
+          return;
+        }
+        _refreshActiveOrderFromServer();
+      },
+    );
+  }
+
+  void _stopOrderPolling() {
+    _orderPollingTimer?.cancel();
+    _orderPollingTimer = null;
+  }
+
+  Future<void> _refreshActiveOrderFromServer({bool showLoader = false}) async {
+    final order = _activeOrder;
+    if (order == null) return;
+
+    if (showLoader) {
+      if (_isSubmitting) return;
+      setState(() {
+        _isSubmitting = true;
+        _errorMessage = null;
+      });
+    }
+
+    try {
+      final fresh = await widget.apiClient.getOrder(order.id);
+      if (!mounted) return;
+      setState(() {
+        _activeOrder = fresh;
+      });
+      _syncStepWithOrder(fresh);
+    } catch (error) {
+      if (!mounted || !showLoader) return;
+      setState(() => _errorMessage = error.toString());
+    } finally {
+      if (mounted && showLoader) {
+        setState(() => _isSubmitting = false);
+      }
+    }
+  }
+
+  void _syncStepWithOrder(BackendOrder order) {
+    if (!mounted) return;
+
+    if (order.status == 'COMPLETED') {
+      _stopOrderPolling();
+      setState(() => _step = ClientFlowStep.completed);
+      return;
+    }
+
+    if (order.status == 'CANCELED') {
+      _stopOrderPolling();
+      setState(() {
+        _step = ClientFlowStep.home;
+        _errorMessage = null;
+        _activeOrder = null;
+      });
+      _refreshNearbyDrivers();
+      return;
+    }
+
+    if (order.status == 'DRIVER_ASSIGNED' ||
+        order.status == 'DRIVER_ARRIVING' ||
+        order.status == 'IN_PROGRESS') {
+      _startOrderPolling();
+      setState(() => _step = ClientFlowStep.tracking);
+      return;
+    }
+
+    if (order.status == 'SEARCHING_DRIVER') {
+      _startOrderPolling();
+      setState(() => _step = ClientFlowStep.searching);
+      return;
+    }
+
+    _stopOrderPolling();
   }
 
   // ── Routing estimate (backend) ─────────────────────────────────────────────
@@ -645,12 +790,13 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
       _step = ClientFlowStep.searching;
       _isSubmitting = true;
       _errorMessage = null;
+      _nearbyOnlineDriverPoints = const [];
     });
 
     try {
       final order = await widget.apiClient.createOrder(
         passengerId: widget.session.userId,
-        cityId: 'almaty',
+        cityId: _activeCityId,
         pickupLatitude: pickup.latitude,
         pickupLongitude: pickup.longitude,
         dropoffLatitude: dropoff.latitude,
@@ -671,9 +817,15 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     }
   }
 
-  Future<void> _searchDriverForCurrentOrder({bool showLoader = true}) async {
+  Future<void> _searchDriverForCurrentOrder({
+    bool showLoader = true,
+    bool showNotFoundError = true,
+  }) async {
+    if (_isDriverSearchInFlight) return;
     final order = _activeOrder;
     if (order == null) return;
+
+    _isDriverSearchInFlight = true;
 
     if (showLoader) {
       setState(() {
@@ -687,58 +839,21 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
       if (!mounted) return;
       setState(() => _activeOrder = assigned);
       _scheduleRouteRefresh(delay: Duration.zero);
+      _syncStepWithOrder(assigned);
 
       if (assigned.driverId == null || assigned.status != 'DRIVER_ASSIGNED') {
-        setState(() => _errorMessage = _i18n.t('driver_not_found'));
-        return;
+        if (showNotFoundError) {
+          setState(() => _errorMessage = _i18n.t('driver_not_found'));
+        }
+      } else {
+        setState(() => _errorMessage = null);
       }
-
-      final arriving = await widget.apiClient
-          .updateOrderStatus(assigned.id, 'DRIVER_ARRIVING');
-      if (!mounted) return;
-      setState(() {
-        _activeOrder = arriving;
-        _step = ClientFlowStep.tracking;
-        _errorMessage = null;
-      });
-      _scheduleRouteRefresh(delay: Duration.zero);
     } catch (error) {
       if (!mounted) return;
       setState(() => _errorMessage = error.toString());
     } finally {
+      _isDriverSearchInFlight = false;
       if (mounted && showLoader) setState(() => _isSubmitting = false);
-    }
-  }
-
-  Future<void> _completeTrip() async {
-    final order = _activeOrder;
-    if (order == null || _isSubmitting) return;
-    setState(() {
-      _isSubmitting = true;
-      _errorMessage = null;
-    });
-
-    try {
-      BackendOrder current = order;
-      if (current.status != 'IN_PROGRESS') {
-        current =
-            await widget.apiClient.updateOrderStatus(current.id, 'IN_PROGRESS');
-      }
-      if (current.status != 'COMPLETED') {
-        current =
-            await widget.apiClient.updateOrderStatus(current.id, 'COMPLETED');
-      }
-      if (!mounted) return;
-      setState(() {
-        _activeOrder = current;
-        _step = ClientFlowStep.completed;
-      });
-      _scheduleRouteRefresh(delay: Duration.zero);
-    } catch (error) {
-      if (!mounted) return;
-      setState(() => _errorMessage = error.toString());
-    } finally {
-      if (mounted) setState(() => _isSubmitting = false);
     }
   }
 
@@ -758,6 +873,8 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
       _pickupOverrideLatLng = null;
       _pickupController.clear();
     });
+    _stopOrderPolling();
+    _refreshNearbyDrivers();
     _scheduleRouteRefresh(delay: Duration.zero);
   }
 
@@ -792,6 +909,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
               pickupPoint: _currentLatLng ?? _fallbackPickup,
               dropoffPoint: hasDest ? _destinationLatLng : null,
               routePolylinePoints: hasDest ? _routePolylinePoints : null,
+              nearbyDriverPoints: _nearbyOnlineDriverPoints,
               onMapTap: _step == ClientFlowStep.home ? _onMapTapped : null,
             ),
           ),
@@ -1085,6 +1203,16 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                         i18n.t('map_tap_hint'),
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: UiKitColors.textSecondary,
+                            ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        i18n.t('online_drivers_count', {
+                          'count': _nearbyOnlineDriverPoints.length.toString(),
+                        }),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: UiKitColors.textSecondary,
+                              fontWeight: FontWeight.w600,
                             ),
                       ),
                     ],
@@ -1436,7 +1564,11 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                         const SizedBox(width: 12),
                         Expanded(
                           child: FilledButton(
-                            onPressed: _isSubmitting ? null : _completeTrip,
+                            onPressed: _isSubmitting
+                                ? null
+                                : () => _refreshActiveOrderFromServer(
+                                      showLoader: true,
+                                    ),
                             style: FilledButton.styleFrom(
                               minimumSize: const Size.fromHeight(56),
                               shape: RoundedRectangleBorder(
@@ -1445,7 +1577,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                             child: Text(
                               _isSubmitting
                                   ? i18n.t('updating')
-                                  : i18n.t('complete_trip'),
+                                  : i18n.t('refresh_status'),
                             ),
                           ),
                         ),
@@ -1518,6 +1650,8 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                   _errorMessage = null;
                   _step = ClientFlowStep.home;
                 });
+                _stopOrderPolling();
+                _refreshNearbyDrivers();
                 _scheduleRouteRefresh(delay: Duration.zero);
               },
               style: FilledButton.styleFrom(

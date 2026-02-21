@@ -37,6 +37,11 @@ export class MatchmakingService {
   }
 
   async releaseDriver(driverId: string): Promise<void> {
+    await this.redisGeoService.setDriverBusy(driverId, false);
     await this.redisGeoService.releaseDriverLock(driverId);
+  }
+
+  async setDriverBusy(driverId: string, busy: boolean): Promise<void> {
+    await this.redisGeoService.setDriverBusy(driverId, busy);
   }
 }

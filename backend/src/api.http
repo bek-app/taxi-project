@@ -65,6 +65,10 @@ Authorization: Bearer {{token}}
   "longitude": 76.889709
 }
 
+### Nearby online drivers (for map)
+GET {{baseUrl}}/drivers/nearby?latitude=43.238949&longitude=76.889709&radiusKm=5&limit=20
+Authorization: Bearer {{token}}
+
 ### Create order
 # @name createOrder
 POST {{baseUrl}}/orders

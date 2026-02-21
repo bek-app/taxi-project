@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import '../models/app_role.dart';
 import '../models/auth_session.dart';
 import '../models/backend_order.dart';
+import '../models/nearby_driver.dart';
 import '../models/route_snapshot.dart';
 
 class TaxiApiClient {
@@ -137,6 +138,33 @@ class TaxiApiClient {
   Future<BackendOrder> searchDriver(String orderId) async {
     final response = await _post('/orders/$orderId/search-driver');
     return BackendOrder.fromJson(_decodeAsMap(response));
+  }
+
+  Future<BackendOrder> getOrder(String orderId) async {
+    final response = await _get('/orders/$orderId');
+    return BackendOrder.fromJson(_decodeAsMap(response));
+  }
+
+  Future<List<NearbyDriver>> listNearbyDrivers({
+    required double latitude,
+    required double longitude,
+    double radiusKm = 5,
+    int limit = 20,
+  }) async {
+    final uri = Uri.parse('$baseUrl/drivers/nearby').replace(
+      queryParameters: <String, String>{
+        'latitude': latitude.toStringAsFixed(6),
+        'longitude': longitude.toStringAsFixed(6),
+        'radiusKm': radiusKm.toStringAsFixed(2),
+        'limit': limit.toString(),
+      },
+    );
+    final response = await _client.get(
+      uri,
+      headers: _headers(includeAuth: true),
+    );
+    final decoded = _decodeAsList(response);
+    return decoded.map(NearbyDriver.fromJson).toList(growable: false);
   }
 
   Future<BackendOrder> updateOrderStatus(String orderId, String status) async {
