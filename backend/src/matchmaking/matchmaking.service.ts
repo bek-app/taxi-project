@@ -12,10 +12,26 @@ export class MatchmakingService {
 
   async findDriverForOrder(order: Order): Promise<string | null> {
     const baseRadius = Number(this.configService.get<string>('MATCH_RADIUS_KM', '5'));
+    const configuredMaxRadius = Number(this.configService.get<string>('MATCH_MAX_RADIUS_KM', '60'));
     const limit = Number(this.configService.get<string>('MATCH_LIMIT', '10'));
     const offerTtl = Number(this.configService.get<string>('MATCH_OFFER_TTL_SEC', '30'));
 
-    const radiuses = [baseRadius, baseRadius * 2, baseRadius * 3];
+    const normalizedBaseRadius = Number.isFinite(baseRadius) && baseRadius > 0 ? baseRadius : 5;
+    const normalizedMaxRadius =
+      Number.isFinite(configuredMaxRadius) && configuredMaxRadius > 0
+        ? Math.max(configuredMaxRadius, normalizedBaseRadius)
+        : Math.max(normalizedBaseRadius, 60);
+
+    const radiuses = Array.from(
+      new Set([
+        normalizedBaseRadius,
+        normalizedBaseRadius * 2,
+        normalizedBaseRadius * 4,
+        normalizedMaxRadius,
+      ]),
+    )
+      .filter((radius) => radius > 0)
+      .sort((a, b) => a - b);
 
     for (const radius of radiuses) {
       const candidates = await this.redisGeoService.findNearbyAvailableDrivers(

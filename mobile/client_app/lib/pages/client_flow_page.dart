@@ -936,7 +936,10 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
       if (!mounted) return;
       setState(() => _activeOrder = order);
       _scheduleRouteRefresh(delay: Duration.zero);
-      await _searchDriverForCurrentOrder(showLoader: false);
+      await _searchDriverForCurrentOrder(
+        showLoader: false,
+        showNotFoundError: false,
+      );
     } catch (error) {
       if (!mounted) return;
       final raw = error.toString();

@@ -106,6 +106,22 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
     });
 
     try {
+      if (value) {
+        await _ensureLocationPermission();
+        final position = _currentPosition ?? await _readCurrentPosition();
+        if (!mounted) return;
+        setState(() {
+          _currentPosition = position;
+          _error = null;
+        });
+        await widget.apiClient.updateDriverLocation(
+          latitude: position.latitude,
+          longitude: position.longitude,
+        );
+        _lastDriverLocationSyncAt = DateTime.now();
+        _lastSyncedDriverPosition = position;
+      }
+
       await widget.apiClient.setDriverAvailability(value);
 
       if (!mounted) return;

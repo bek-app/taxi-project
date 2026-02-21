@@ -40,6 +40,7 @@ export class RedisGeoService implements OnModuleDestroy {
 
     await this.redis.hdel(this.availabilityKey, driverId);
     await this.redis.hdel(this.busyKey, driverId);
+    await this.redis.zrem(this.driversKey, driverId);
     await this.releaseDriverLock(driverId);
   }
 
@@ -61,6 +62,8 @@ export class RedisGeoService implements OnModuleDestroy {
     radiusKm: number,
     limit: number,
   ): Promise<string[]> {
+    const normalizedLimit = Math.max(1, Math.floor(limit));
+    const searchCount = Math.min(500, Math.max(normalizedLimit * 5, normalizedLimit));
     const result = (await this.redis.call(
       'GEOSEARCH',
       this.driversKey,
@@ -72,7 +75,7 @@ export class RedisGeoService implements OnModuleDestroy {
       'km',
       'ASC',
       'COUNT',
-      String(limit),
+      String(searchCount),
     )) as string[];
 
     const driverIds = Array.isArray(result) ? result : [];
@@ -82,9 +85,11 @@ export class RedisGeoService implements OnModuleDestroy {
 
     const availability = await this.redis.hmget(this.availabilityKey, ...driverIds);
     const busy = await this.redis.hmget(this.busyKey, ...driverIds);
-    return driverIds.filter(
+    return driverIds
+      .filter(
       (driverId, index) => availability[index] === '1' && busy[index] !== '1',
-    );
+    )
+      .slice(0, normalizedLimit);
   }
 
   async findNearbyAvailableDriverLocations(
@@ -93,6 +98,8 @@ export class RedisGeoService implements OnModuleDestroy {
     radiusKm: number,
     limit: number,
   ): Promise<NearbyDriverLocation[]> {
+    const normalizedLimit = Math.max(1, Math.floor(limit));
+    const searchCount = Math.min(500, Math.max(normalizedLimit * 5, normalizedLimit));
     const raw = (await this.redis.call(
       'GEOSEARCH',
       this.driversKey,
@@ -104,7 +111,7 @@ export class RedisGeoService implements OnModuleDestroy {
       'km',
       'ASC',
       'COUNT',
-      String(limit),
+      String(searchCount),
       'WITHDIST',
       'WITHCOORD',
     )) as unknown;
@@ -160,13 +167,42 @@ export class RedisGeoService implements OnModuleDestroy {
       this.busyKey,
       ...parsed.map((item) => item.driverId),
     );
-    return parsed.filter((item, index) => availability[index] === '1' && busy[index] !== '1');
+    return parsed
+      .filter((item, index) => availability[index] === '1' && busy[index] !== '1')
+      .slice(0, normalizedLimit);
   }
 
   async claimDriverForOrder(driverId: string, orderId: string, ttlSeconds: number): Promise<boolean> {
     const lockKey = this.driverLockKey(driverId);
-    const lockResult = await this.redis.set(lockKey, orderId, 'EX', ttlSeconds, 'NX');
-    return lockResult === 'OK';
+    const result = await this.redis.eval(
+      `
+      local availability = redis.call('HGET', KEYS[1], ARGV[1])
+      if availability ~= '1' then
+        return 0
+      end
+
+      local busy = redis.call('HGET', KEYS[2], ARGV[1])
+      if busy == '1' then
+        return 0
+      end
+
+      local lockResult = redis.call('SET', KEYS[3], ARGV[2], 'EX', ARGV[3], 'NX')
+      if lockResult then
+        return 1
+      end
+
+      return 0
+      `,
+      3,
+      this.availabilityKey,
+      this.busyKey,
+      lockKey,
+      driverId,
+      orderId,
+      String(ttlSeconds),
+    );
+
+    return Number(result) === 1;
   }
 
   async releaseDriverLock(driverId: string): Promise<void> {

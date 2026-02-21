@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_map_dragmarker/flutter_map_dragmarker.dart';
@@ -92,8 +93,11 @@ class _MapBackdropState extends State<MapBackdrop> {
         ? fromBackend
         : _fallbackPolylinePoints();
 
+    final usePickupDragMarker =
+        widget.pickupPoint != null && widget.pickupDraggable && !kIsWeb;
+
     final dragMarkers = <DragMarker>[
-      if (widget.pickupPoint != null && widget.pickupDraggable)
+      if (usePickupDragMarker)
         DragMarker(
           point: widget.pickupPoint!,
           size: const Size(42, 42),
@@ -127,7 +131,7 @@ class _MapBackdropState extends State<MapBackdrop> {
             ),
           ),
         ),
-      if (widget.pickupPoint != null && !widget.pickupDraggable)
+      if (widget.pickupPoint != null && !usePickupDragMarker)
         Marker(
           point: widget.pickupPoint!,
           width: 42,
