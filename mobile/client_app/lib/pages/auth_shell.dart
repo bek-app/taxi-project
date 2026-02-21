@@ -189,46 +189,6 @@ class _RoleSwitcherShellState extends State<RoleSwitcherShell> {
     );
   }
 
-  Widget _buildHeaderBadge() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xEBFFFFFF),
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x14000000),
-            blurRadius: 16,
-            offset: Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            _displayName,
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          Text(
-            _activeRole.label(widget.lang),
-            style: const TextStyle(
-              fontSize: 11,
-              color: Color(0xFF64748B),
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildRoleSwitcher() {
     final allowedRoles = _allowedRoles;
     return SegmentedButton<AppRole>(
@@ -373,7 +333,6 @@ class _RoleSwitcherShellState extends State<RoleSwitcherShell> {
       builder: (context, constraints) {
         final isWide = constraints.maxWidth >= 1080;
         final sidebar = _buildSidebarPanel(i18n);
-        final headerBadge = _buildHeaderBadge();
 
         if (isWide) {
           return Scaffold(
@@ -387,18 +346,7 @@ class _RoleSwitcherShellState extends State<RoleSwitcherShell> {
                       child: sidebar,
                     ),
                   ),
-                  Expanded(
-                    child: Stack(
-                      children: [
-                        Positioned.fill(child: _buildMainContent()),
-                        Positioned(
-                          top: 12,
-                          left: 12,
-                          child: headerBadge,
-                        ),
-                      ],
-                    ),
-                  ),
+                  Expanded(child: _buildMainContent()),
                 ],
               ),
             ),
@@ -431,13 +379,6 @@ class _RoleSwitcherShellState extends State<RoleSwitcherShell> {
                             tooltip: 'Menu',
                           );
                         },
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: headerBadge,
-                        ),
                       ),
                     ],
                   ),

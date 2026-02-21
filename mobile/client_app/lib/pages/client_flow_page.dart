@@ -244,6 +244,160 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
 
   // ── Geocoding (Nominatim) ─────────────────────────────────────────────────
 
+  Map<String, String> _nominatimHeaders() {
+    if (kIsWeb) {
+      return const <String, String>{};
+    }
+    return const <String, String>{
+      'User-Agent': 'TaxiMVP/1.0 (kz.taxi.project)',
+    };
+  }
+
+  String _preferredLanguageCode() {
+    return widget.lang == AppLang.kz ? 'kk,ru,en' : 'ru,kk,en';
+  }
+
+  String _shortAddress(String displayName) {
+    final parts = displayName
+        .split(',')
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
+    if (parts.isEmpty) {
+      return displayName.trim();
+    }
+    if (parts.length == 1) {
+      return parts.first;
+    }
+    return '${parts[0]}, ${parts[1]}';
+  }
+
+  String _formatLatLng(LatLng point) {
+    return '${point.latitude.toStringAsFixed(5)}, ${point.longitude.toStringAsFixed(5)}';
+  }
+
+  bool _isSamePoint(LatLng a, LatLng b) {
+    return (a.latitude - b.latitude).abs() < 0.00001 &&
+        (a.longitude - b.longitude).abs() < 0.00001;
+  }
+
+  Future<String?> _reverseGeocodeLabel(LatLng point) async {
+    final uri = Uri.https('nominatim.openstreetmap.org', '/reverse', {
+      'lat': point.latitude.toStringAsFixed(6),
+      'lon': point.longitude.toStringAsFixed(6),
+      'format': 'jsonv2',
+      'zoom': '18',
+      'addressdetails': '1',
+      'accept-language': _preferredLanguageCode(),
+    });
+
+    final response = await http.get(uri, headers: _nominatimHeaders());
+    if (response.statusCode != 200) {
+      return null;
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      return null;
+    }
+
+    final displayName = (decoded['display_name'] ?? '').toString().trim();
+    if (displayName.isEmpty) {
+      return null;
+    }
+    return _shortAddress(displayName);
+  }
+
+  void _autofillPickupFromCurrentLocation({bool force = false}) {
+    final current = _currentLatLng;
+    if (current == null) {
+      return;
+    }
+    unawaited(_reverseGeocodePickup(current, force: force));
+  }
+
+  Future<void> _reverseGeocodePickup(LatLng point, {bool force = false}) async {
+    if (!force) {
+      if (_pickupOverrideLatLng != null) {
+        return;
+      }
+      if (_pickupController.text.trim().isNotEmpty) {
+        return;
+      }
+    }
+
+    if (_isReverseGeocodingPickup) {
+      return;
+    }
+
+    _isReverseGeocodingPickup = true;
+    final token = ++_pickupGeocodeToken;
+
+    try {
+      final label = await _reverseGeocodeLabel(point);
+      if (!mounted || token != _pickupGeocodeToken) {
+        return;
+      }
+
+      final text = label ?? _formatLatLng(point);
+      if (_pickupOverrideLatLng != null && !force) {
+        return;
+      }
+
+      setState(() {
+        _pickupController.text = text;
+      });
+    } catch (_) {
+      if (!mounted || token != _pickupGeocodeToken) {
+        return;
+      }
+      setState(() {
+        if (_pickupController.text.trim().isEmpty) {
+          _pickupController.text = _formatLatLng(point);
+        }
+      });
+    } finally {
+      _isReverseGeocodingPickup = false;
+    }
+  }
+
+  Future<void> _resolveDestinationAddress(LatLng point) async {
+    final token = ++_destinationGeocodeToken;
+    try {
+      final label = await _reverseGeocodeLabel(point);
+      if (!mounted || token != _destinationGeocodeToken) {
+        return;
+      }
+      final current = _destinationLatLng;
+      if (current == null || !_isSamePoint(current, point)) {
+        return;
+      }
+
+      if (label == null || label.isEmpty) {
+        return;
+      }
+
+      setState(() {
+        _destinationName = label;
+        _searchController.text = label;
+      });
+    } catch (_) {}
+  }
+
+  void _onMapTapped(LatLng point) {
+    final formatted = _formatLatLng(point);
+    setState(() {
+      _destinationLatLng = point;
+      _destinationName = formatted;
+      _searchController.text = formatted;
+      _suggestions = [];
+      _activeSearch = _ActiveSearch.none;
+    });
+    FocusManager.instance.primaryFocus?.unfocus();
+    _scheduleRouteRefresh();
+    unawaited(_resolveDestinationAddress(point));
+  }
+
   void _onPickupChanged(String value) {
     _debounce?.cancel();
     setState(() => _activeSearch = _ActiveSearch.pickup);
@@ -275,12 +429,9 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
         'format': 'json',
         'limit': '5',
         'countrycodes': 'kz',
-        'accept-language': widget.lang == AppLang.kz ? 'kk,ru,en' : 'ru,kk,en',
+        'accept-language': _preferredLanguageCode(),
       });
-      final response = await http.get(
-        uri,
-        headers: {'User-Agent': 'TaxiMVP/1.0 (kz.taxi.project)'},
-      );
+      final response = await http.get(uri, headers: _nominatimHeaders());
       if (!mounted) return;
       if (response.statusCode == 200) {
         final list = jsonDecode(response.body) as List;
@@ -295,8 +446,12 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                   ))
               .toList();
         });
+      } else {
+        setState(() => _suggestions = []);
       }
     } catch (_) {
+      if (!mounted) return;
+      setState(() => _suggestions = []);
     } finally {
       if (mounted) setState(() => _isSearching = false);
     }
@@ -330,6 +485,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
       _pickupController.clear();
       _suggestions = [];
     });
+    _autofillPickupFromCurrentLocation(force: true);
     _scheduleRouteRefresh();
   }
 
@@ -340,6 +496,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
       _searchController.clear();
       _suggestions = [];
     });
+    _destinationGeocodeToken++;
     _scheduleRouteRefresh();
   }
 
@@ -611,8 +768,6 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     switch (_step) {
       case ClientFlowStep.home:
         return _buildHomeScreen(context);
-      case ClientFlowStep.confirmRide:
-        return _buildConfirmRideScreen(context);
       case ClientFlowStep.searching:
         return _buildSearchingScreen(context);
       case ClientFlowStep.tracking:
@@ -637,6 +792,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
               pickupPoint: _currentLatLng ?? _fallbackPickup,
               dropoffPoint: hasDest ? _destinationLatLng : null,
               routePolylinePoints: hasDest ? _routePolylinePoints : null,
+              onMapTap: _step == ClientFlowStep.home ? _onMapTapped : null,
             ),
           ),
 
@@ -674,8 +830,8 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                               child: TextField(
                                 controller: _pickupController,
                                 onChanged: _onPickupChanged,
-                                onTap: () => setState(() =>
-                                    _activeSearch = _ActiveSearch.pickup),
+                                onTap: () => setState(
+                                    () => _activeSearch = _ActiveSearch.pickup),
                                 decoration: InputDecoration(
                                   hintText: i18n.t('your_location'),
                                   hintStyle: const TextStyle(
@@ -683,8 +839,8 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                                   border: InputBorder.none,
                                   enabledBorder: InputBorder.none,
                                   focusedBorder: InputBorder.none,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                      vertical: 15),
+                                  contentPadding:
+                                      const EdgeInsets.symmetric(vertical: 15),
                                 ),
                               ),
                             ),
@@ -742,8 +898,8 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                                   border: InputBorder.none,
                                   enabledBorder: InputBorder.none,
                                   focusedBorder: InputBorder.none,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                      vertical: 15),
+                                  contentPadding:
+                                      const EdgeInsets.symmetric(vertical: 15),
                                 ),
                               ),
                             ),
@@ -796,8 +952,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                               const Divider(height: 1, indent: 56),
                           itemBuilder: (context, index) {
                             final s = _suggestions[index];
-                            final title =
-                                s.displayName.split(',').first.trim();
+                            final title = s.displayName.split(',').first.trim();
                             final subtitle = s.displayName
                                 .split(',')
                                 .skip(1)
@@ -895,19 +1050,16 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                                 : (_locationError == null
                                     ? i18n.t('location_ready')
                                     : _locationError!),
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(
-                                  color: _locationError == null
-                                      ? UiKitColors.textSecondary
-                                      : UiKitColors.danger,
-                                ),
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: _locationError == null
+                                          ? UiKitColors.textSecondary
+                                          : UiKitColors.danger,
+                                    ),
                           ),
                         ),
                         GestureDetector(
-                          onTap:
-                              _isLocating ? null : _refreshCurrentLocation,
+                          onTap: _isLocating ? null : _refreshCurrentLocation,
                           child: Container(
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 8, vertical: 3),
@@ -927,11 +1079,19 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                         ),
                       ],
                     ),
+                    if (!hasDest) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        i18n.t('map_tap_hint'),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: UiKitColors.textSecondary,
+                            ),
+                      ),
+                    ],
                     if (hasDest) ...[
                       const SizedBox(height: 16),
                       const Divider(height: 1, color: Color(0xFFF3F4F6)),
                       const SizedBox(height: 14),
-                      // Destination row
                       Row(
                         children: [
                           const Icon(Icons.location_on_rounded,
@@ -962,9 +1122,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                         Row(
                           children: [
                             Icon(
-                              _isRouteLoading
-                                  ? Icons.sync
-                                  : Icons.info_outline,
+                              _isRouteLoading ? Icons.sync : Icons.info_outline,
                               size: 13,
                               color: _routeInfoColor(),
                             ),
@@ -979,7 +1137,45 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                           ],
                         ),
                       ],
-                      // Price
+                      const SizedBox(height: 14),
+                      Text(
+                        i18n.t('tariff'),
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: List.generate(_tariffs.length, (index) {
+                          final tariff = _tariffs[index];
+                          final isSelected = _selectedTariff == index;
+                          final tariffPrice =
+                              _baseFormulaPrice * tariff.multiplier;
+                          return ChoiceChip(
+                            label: Text(
+                              '${i18n.t(tariff.nameKey)} • ${tariffPrice.toStringAsFixed(0)} ₸',
+                            ),
+                            selected: isSelected,
+                            onSelected: (_) =>
+                                setState(() => _selectedTariff = index),
+                            selectedColor: const Color(0xFFE0E7FF),
+                            checkmarkColor: UiKitColors.primary,
+                            labelStyle: TextStyle(
+                              color: isSelected
+                                  ? UiKitColors.primary
+                                  : UiKitColors.textPrimary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            side: BorderSide(
+                              color: isSelected
+                                  ? UiKitColors.primary
+                                  : const Color(0xFFE5E7EB),
+                            ),
+                          );
+                        }),
+                      ),
                       const SizedBox(height: 14),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -1015,9 +1211,8 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                       const SizedBox(height: 16),
                     // CTA button
                     FilledButton(
-                      onPressed: hasDest
-                          ? () => setState(
-                              () => _step = ClientFlowStep.confirmRide)
+                      onPressed: hasDest && !_isSubmitting
+                          ? _confirmRideAndRequestDriver
                           : null,
                       style: FilledButton.styleFrom(
                         minimumSize: const Size.fromHeight(56),
@@ -1027,9 +1222,11 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                         disabledForegroundColor: UiKitColors.textSecondary,
                       ),
                       child: Text(
-                        hasDest
-                            ? i18n.t('confirm_ride')
-                            : i18n.t('where_to'),
+                        _isSubmitting
+                            ? i18n.t('please_wait')
+                            : hasDest
+                                ? i18n.t('confirm_ride')
+                                : i18n.t('where_to'),
                         style: const TextStyle(
                             fontSize: 16, fontWeight: FontWeight.w700),
                       ),
@@ -1037,135 +1234,6 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                   ],
                 ),
               ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildConfirmRideScreen(BuildContext context) {
-    final i18n = _i18n;
-
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        title: Text(i18n.t('confirm_ride')),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        children: [
-          SizedBox(
-            height: 220,
-            child: ClipRRect(
-              borderRadius: const BorderRadius.all(Radius.circular(20)),
-              child: MapBackdrop(
-                currentLocation: _currentLatLng,
-                pickupPoint: _pickupPoint,
-                dropoffPoint: _dropoffPoint,
-                routePolylinePoints: _routePolylinePoints,
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    i18n.t('tariff'),
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 12),
-                  ...List.generate(_tariffs.length, (index) {
-                    final tariff = _tariffs[index];
-                    final isSelected = _selectedTariff == index;
-                    final price = _baseFormulaPrice * tariff.multiplier;
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: isSelected
-                              ? UiKitColors.primary
-                              : const Color(0xFFE5E7EB),
-                          width: 1.5,
-                        ),
-                      ),
-                      child: ListTile(
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16)),
-                        title: Text(i18n.t(tariff.nameKey)),
-                        subtitle: Text(
-                          i18n.t('tariff_multiplier',
-                              {'value': tariff.multiplier.toStringAsFixed(2)}),
-                        ),
-                        trailing: Text('${price.toStringAsFixed(0)} ₸'),
-                        onTap: () => setState(() => _selectedTariff = index),
-                      ),
-                    );
-                  }),
-                  const SizedBox(height: 8),
-                  Text(
-                    i18n.t('formula_caption'),
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: UiKitColors.textSecondary,
-                        ),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.baseline,
-                    textBaseline: TextBaseline.alphabetic,
-                    children: [
-                      Text(
-                        _finalPrice.toStringAsFixed(0),
-                        style: Theme.of(context)
-                            .textTheme
-                            .headlineMedium
-                            ?.copyWith(
-                              fontWeight: FontWeight.w800,
-                              color: UiKitColors.primary,
-                            ),
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        '₸',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.w700,
-                              color: UiKitColors.primary,
-                            ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Center(
-                    child: Text(
-                      _routeInfoText(),
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: _routeInfoColor(),
-                            fontWeight: FontWeight.w600,
-                          ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          FilledButton(
-            onPressed: _isSubmitting ? null : _confirmRideAndRequestDriver,
-            style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(56),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16)),
-            ),
-            child: Text(
-              _isSubmitting ? i18n.t('please_wait') : i18n.t('confirm_ride'),
-              style:
-                  const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
             ),
           ),
         ],

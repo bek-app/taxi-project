@@ -48,6 +48,7 @@ class AppI18n {
       'location_service_disabled':
           'Геолокация сервисі өшірілген. Қосып қайта көріңіз.',
       'location_unknown': 'Орныңыз анықталмады',
+      'map_tap_hint': 'Картадан нүкте басып destination таңдаңыз.',
       'search_pickup': 'Шығу нүктесін іздеу',
       'your_location': 'Сіздің орыныңыз',
       'search_destination': 'Мекенжай іздеу',
@@ -141,6 +142,7 @@ class AppI18n {
       'location_service_disabled':
           'Сервис геолокации отключен. Включите и повторите.',
       'location_unknown': 'Не удалось определить местоположение',
+      'map_tap_hint': 'Нажмите на карту, чтобы выбрать destination.',
       'search_pickup': 'Откуда едем?',
       'your_location': 'Ваше местоположение',
       'search_destination': 'Введите адрес',
