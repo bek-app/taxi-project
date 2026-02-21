@@ -48,6 +48,9 @@ class AppI18n {
       'location_service_disabled':
           'Геолокация сервисі өшірілген. Қосып қайта көріңіз.',
       'location_unknown': 'Орныңыз анықталмады',
+      'current_city': 'Қазіргі қала: {city}',
+      'current_address': 'Ағымдағы адрес: {address}',
+      'city_unknown': 'анықталмады',
       'map_tap_hint': 'Картадан нүкте басып destination таңдаңыз.',
       'online_drivers_count': 'Online жүргізушілер: {count}',
       'refresh_status': 'Күйді жаңарту',
@@ -144,6 +147,9 @@ class AppI18n {
       'location_service_disabled':
           'Сервис геолокации отключен. Включите и повторите.',
       'location_unknown': 'Не удалось определить местоположение',
+      'current_city': 'Текущий город: {city}',
+      'current_address': 'Текущий адрес: {address}',
+      'city_unknown': 'не определен',
       'map_tap_hint': 'Нажмите на карту, чтобы выбрать destination.',
       'online_drivers_count': 'Онлайн водителей: {count}',
       'refresh_status': 'Обновить статус',

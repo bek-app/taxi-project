@@ -97,7 +97,7 @@ class TaxiApiClient {
 
   Future<BackendOrder> createOrder({
     required String passengerId,
-    required String cityId,
+    String? cityId,
     required double pickupLatitude,
     required double pickupLongitude,
     required double dropoffLatitude,
@@ -106,19 +106,23 @@ class TaxiApiClient {
     required double durationMinutes,
     required double surgeMultiplier,
   }) async {
+    final body = <String, dynamic>{
+      'passengerId': passengerId,
+      'pickupLatitude': pickupLatitude,
+      'pickupLongitude': pickupLongitude,
+      'dropoffLatitude': dropoffLatitude,
+      'dropoffLongitude': dropoffLongitude,
+      'distanceKm': distanceKm,
+      'durationMinutes': durationMinutes,
+      'surgeMultiplier': surgeMultiplier,
+    };
+    if (cityId != null && cityId.trim().isNotEmpty) {
+      body['cityId'] = cityId.trim();
+    }
+
     final response = await _post(
       '/orders',
-      body: {
-        'passengerId': passengerId,
-        'cityId': cityId,
-        'pickupLatitude': pickupLatitude,
-        'pickupLongitude': pickupLongitude,
-        'dropoffLatitude': dropoffLatitude,
-        'dropoffLongitude': dropoffLongitude,
-        'distanceKm': distanceKm,
-        'durationMinutes': durationMinutes,
-        'surgeMultiplier': surgeMultiplier,
-      },
+      body: body,
     );
     return BackendOrder.fromJson(_decodeAsMap(response));
   }

@@ -38,9 +38,6 @@ class ClientFlowPage extends StatefulWidget {
 class _ClientFlowPageState extends State<ClientFlowPage> {
   static const _fallbackPickup = LatLng(43.238949, 76.889709);
   static const _fallbackDropoff = LatLng(43.252600, 76.926400);
-  static const _activeCityId = 'almaty';
-  static const _activeCityQueryName = 'Almaty';
-  static const _activeCityViewBox = '76.70,43.42,77.15,43.10';
   static const _baseFare = 500.0;
   static const _perKm = 120.0;
   static const _perMinute = 25.0;
@@ -86,6 +83,13 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
   int _pickupGeocodeToken = 0;
   int _destinationGeocodeToken = 0;
   List<LatLng> _nearbyOnlineDriverPoints = const [];
+  String? _currentCityName;
+  String? _currentCityId;
+  String? _currentCityViewBox;
+  String? _currentCountryCode;
+  String? _currentAddressLabel;
+  LatLng? _lastPickupGeocodedPoint;
+  DateTime? _lastPickupGeocodedAt;
 
   LatLng? get _currentLatLng {
     final p = _currentPosition;
@@ -269,7 +273,11 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
   }
 
   String _cityScopedQuery(String query) {
-    return '$query, $_activeCityQueryName';
+    final city = _currentCityName?.trim();
+    if (city == null || city.isEmpty) {
+      return query;
+    }
+    return '$query, $city';
   }
 
   String _shortAddress(String displayName) {
@@ -296,7 +304,64 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
         (a.longitude - b.longitude).abs() < 0.00001;
   }
 
-  Future<String?> _reverseGeocodeLabel(LatLng point) async {
+  String? _extractCityName(Map<String, dynamic> address) {
+    const cityKeys = <String>[
+      'city',
+      'town',
+      'village',
+      'municipality',
+      'county',
+      'state_district',
+      'state',
+    ];
+
+    for (final key in cityKeys) {
+      final value = (address[key] ?? '').toString().trim();
+      if (value.isNotEmpty) {
+        return value;
+      }
+    }
+    return null;
+  }
+
+  String? _normalizeCityId(String? cityName) {
+    final raw = cityName?.trim().toLowerCase() ?? '';
+    if (raw.isEmpty) {
+      return null;
+    }
+
+    final normalized = raw
+        .replaceAll(',', '')
+        .replaceAll(RegExp(r'\s+'), '_')
+        .replaceAll(RegExp(r'[^a-z0-9_\-\u0400-\u04FF]'), '');
+    if (normalized.isEmpty) {
+      return null;
+    }
+
+    if (normalized.length <= 64) {
+      return normalized;
+    }
+
+    return normalized.substring(0, 64);
+  }
+
+  String? _toNominatimViewBox(dynamic rawBoundingBox) {
+    if (rawBoundingBox is! List || rawBoundingBox.length < 4) {
+      return null;
+    }
+
+    final south = double.tryParse(rawBoundingBox[0].toString());
+    final north = double.tryParse(rawBoundingBox[1].toString());
+    final west = double.tryParse(rawBoundingBox[2].toString());
+    final east = double.tryParse(rawBoundingBox[3].toString());
+    if (south == null || north == null || west == null || east == null) {
+      return null;
+    }
+
+    return '${west.toStringAsFixed(6)},${north.toStringAsFixed(6)},${east.toStringAsFixed(6)},${south.toStringAsFixed(6)}';
+  }
+
+  Future<_ReverseGeocodeInfo?> _reverseGeocodeInfo(LatLng point) async {
     final uri = Uri.https('nominatim.openstreetmap.org', '/reverse', {
       'lat': point.latitude.toStringAsFixed(6),
       'lon': point.longitude.toStringAsFixed(6),
@@ -311,16 +376,60 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
       return null;
     }
 
-    final decoded = jsonDecode(response.body);
-    if (decoded is! Map<String, dynamic>) {
+    final decodedRaw = jsonDecode(response.body);
+    if (decodedRaw is! Map) {
       return null;
     }
+    final decoded = decodedRaw.map(
+      (key, value) => MapEntry(key.toString(), value),
+    );
 
     final displayName = (decoded['display_name'] ?? '').toString().trim();
-    if (displayName.isEmpty) {
+    final addressRaw = decoded['address'];
+    if (displayName.isEmpty || addressRaw is! Map) {
       return null;
     }
-    return _shortAddress(displayName);
+    final address = addressRaw.map(
+      (key, value) => MapEntry(key.toString(), value),
+    );
+    final cityName = _extractCityName(address);
+    final cityId = _normalizeCityId(cityName);
+    final viewBox = _toNominatimViewBox(decoded['boundingbox']);
+    final countryCode =
+        (address['country_code'] ?? '').toString().trim().toLowerCase();
+
+    return _ReverseGeocodeInfo(
+      shortAddress: _shortAddress(displayName),
+      cityName: cityName,
+      cityId: cityId,
+      cityViewBox: viewBox,
+      countryCode: countryCode.isEmpty ? null : countryCode,
+    );
+  }
+
+  bool _shouldRefreshPickupGeocoding(LatLng point, {required bool force}) {
+    if (force) {
+      return true;
+    }
+
+    final lastAt = _lastPickupGeocodedAt;
+    final lastPoint = _lastPickupGeocodedPoint;
+    if (lastAt == null || lastPoint == null) {
+      return true;
+    }
+
+    final elapsedSeconds = DateTime.now().difference(lastAt).inSeconds;
+    if (elapsedSeconds >= 45) {
+      return true;
+    }
+
+    final movedMeters = Geolocator.distanceBetween(
+      point.latitude,
+      point.longitude,
+      lastPoint.latitude,
+      lastPoint.longitude,
+    );
+    return movedMeters >= 250;
   }
 
   void _autofillPickupFromCurrentLocation({bool force = false}) {
@@ -328,17 +437,21 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     if (current == null) {
       return;
     }
+    if (!_shouldRefreshPickupGeocoding(current, force: force)) {
+      return;
+    }
     unawaited(_reverseGeocodePickup(current, force: force));
   }
 
   Future<void> _reverseGeocodePickup(LatLng point, {bool force = false}) async {
-    if (!force) {
-      if (_pickupOverrideLatLng != null) {
-        return;
-      }
-      if (_pickupController.text.trim().isNotEmpty) {
-        return;
-      }
+    final shouldFillPickup = force ||
+        (_pickupOverrideLatLng == null &&
+            _pickupController.text.trim().isEmpty);
+    if (!shouldFillPickup &&
+        !force &&
+        _currentCityName != null &&
+        _currentAddressLabel != null) {
+      return;
     }
 
     if (_isReverseGeocodingPickup) {
@@ -349,29 +462,45 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     final token = ++_pickupGeocodeToken;
 
     try {
-      final label = await _reverseGeocodeLabel(point);
+      final info = await _reverseGeocodeInfo(point);
       if (!mounted || token != _pickupGeocodeToken) {
         return;
       }
 
-      final text = label ?? _formatLatLng(point);
-      if (_pickupOverrideLatLng != null && !force) {
-        return;
-      }
-
+      final text = info?.shortAddress ?? _formatLatLng(point);
       setState(() {
-        _pickupController.text = text;
+        _currentAddressLabel = text;
+
+        final cityName = info?.cityName?.trim();
+        if (cityName != null && cityName.isNotEmpty) {
+          _currentCityName = cityName;
+          _currentCityId = info?.cityId;
+          _currentCityViewBox = info?.cityViewBox;
+        }
+
+        final countryCode = info?.countryCode?.trim().toLowerCase();
+        if (countryCode != null && countryCode.length == 2) {
+          _currentCountryCode = countryCode;
+        }
+
+        if (shouldFillPickup && (_pickupOverrideLatLng == null || force)) {
+          _pickupController.text = text;
+        }
       });
     } catch (_) {
       if (!mounted || token != _pickupGeocodeToken) {
         return;
       }
       setState(() {
-        if (_pickupController.text.trim().isEmpty) {
-          _pickupController.text = _formatLatLng(point);
+        final text = _formatLatLng(point);
+        _currentAddressLabel ??= text;
+        if (shouldFillPickup && _pickupController.text.trim().isEmpty) {
+          _pickupController.text = text;
         }
       });
     } finally {
+      _lastPickupGeocodedAt = DateTime.now();
+      _lastPickupGeocodedPoint = point;
       _isReverseGeocodingPickup = false;
     }
   }
@@ -379,7 +508,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
   Future<void> _resolveDestinationAddress(LatLng point) async {
     final token = ++_destinationGeocodeToken;
     try {
-      final label = await _reverseGeocodeLabel(point);
+      final info = await _reverseGeocodeInfo(point);
       if (!mounted || token != _destinationGeocodeToken) {
         return;
       }
@@ -388,6 +517,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
         return;
       }
 
+      final label = info?.shortAddress;
       if (label == null || label.isEmpty) {
         return;
       }
@@ -439,15 +569,25 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     if (!mounted) return;
     setState(() => _isSearching = true);
     try {
-      final uri = Uri.https('nominatim.openstreetmap.org', '/search', {
+      final queryParameters = <String, String>{
         'q': _cityScopedQuery(query),
-        'format': 'json',
+        'format': 'jsonv2',
         'limit': '5',
-        'countrycodes': 'kz',
         'accept-language': _preferredLanguageCode(),
-        'viewbox': _activeCityViewBox,
-        'bounded': '1',
-      });
+      };
+
+      final countryCode = _currentCountryCode?.trim().toLowerCase();
+      if (countryCode != null && countryCode.length == 2) {
+        queryParameters['countrycodes'] = countryCode;
+      }
+
+      final viewBox = _currentCityViewBox?.trim();
+      if (viewBox != null && viewBox.isNotEmpty) {
+        queryParameters['viewbox'] = viewBox;
+      }
+
+      final uri =
+          Uri.https('nominatim.openstreetmap.org', '/search', queryParameters);
       final response = await http.get(uri, headers: _nominatimHeaders());
       if (!mounted) return;
       if (response.statusCode == 200) {
@@ -796,7 +936,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     try {
       final order = await widget.apiClient.createOrder(
         passengerId: widget.session.userId,
-        cityId: _activeCityId,
+        cityId: _currentCityId,
         pickupLatitude: pickup.latitude,
         pickupLongitude: pickup.longitude,
         dropoffLatitude: dropoff.latitude,
@@ -898,6 +1038,11 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     final i18n = _i18n;
     final hasDest = _destinationLatLng != null;
     final gpsOk = _currentLatLng != null && _locationError == null;
+    final currentAddress =
+        (_currentAddressLabel ?? _pickupController.text.trim()).trim();
+    final currentCity = (_currentCityName?.trim().isNotEmpty ?? false)
+        ? _currentCityName!.trim()
+        : i18n.t('city_unknown');
 
     return Scaffold(
       body: Stack(
@@ -1197,6 +1342,31 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                         ),
                       ],
                     ),
+                    if (_locationError == null) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        i18n.t('current_city', {'city': currentCity}),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: UiKitColors.textSecondary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                      if (currentAddress.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          i18n.t(
+                              'current_address', {'address': currentAddress}),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: UiKitColors.textSecondary,
+                                  ),
+                        ),
+                      ],
+                    ],
                     if (!hasDest) ...[
                       const SizedBox(height: 10),
                       Text(
@@ -1674,6 +1844,22 @@ class _GeoSuggestion {
   const _GeoSuggestion({required this.displayName, required this.latLng});
   final String displayName;
   final LatLng latLng;
+}
+
+class _ReverseGeocodeInfo {
+  const _ReverseGeocodeInfo({
+    required this.shortAddress,
+    this.cityName,
+    this.cityId,
+    this.cityViewBox,
+    this.countryCode,
+  });
+
+  final String shortAddress;
+  final String? cityName;
+  final String? cityId;
+  final String? cityViewBox;
+  final String? countryCode;
 }
 
 enum _ActiveSearch { none, pickup, dropoff }
