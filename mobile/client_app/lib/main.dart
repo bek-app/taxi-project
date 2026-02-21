@@ -2,8 +2,10 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
+import 'package:latlong2/latlong.dart';
 
 void main() {
   runApp(const TaxiSuperApp());
@@ -83,8 +85,10 @@ class TaxiSuperApp extends StatelessWidget {
           onError: Colors.white,
         ),
         textTheme: baseTextTheme.copyWith(
-          bodyLarge: baseTextTheme.bodyLarge?.copyWith(color: UiKitColors.textPrimary),
-          bodyMedium: baseTextTheme.bodyMedium?.copyWith(color: UiKitColors.textPrimary),
+          bodyLarge:
+              baseTextTheme.bodyLarge?.copyWith(color: UiKitColors.textPrimary),
+          bodyMedium: baseTextTheme.bodyMedium
+              ?.copyWith(color: UiKitColors.textPrimary),
           titleLarge: baseTextTheme.titleLarge?.copyWith(
             color: UiKitColors.textPrimary,
             fontWeight: FontWeight.w700,
@@ -170,8 +174,10 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  final TextEditingController _emailController = TextEditingController(text: 'client@taxi.local');
-  final TextEditingController _passwordController = TextEditingController(text: 'client123');
+  final TextEditingController _emailController =
+      TextEditingController(text: 'client@taxi.local');
+  final TextEditingController _passwordController =
+      TextEditingController(text: 'client123');
   bool _submitting = false;
   String? _error;
 
@@ -243,9 +249,10 @@ class _LoginPageState extends State<LoginPage> {
                   children: [
                     Text(
                       'Taxi Auth Login',
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
+                      style:
+                          Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
                     ),
                     const SizedBox(height: 8),
                     Text(
@@ -276,15 +283,23 @@ class _LoginPageState extends State<LoginPage> {
                       runSpacing: 8,
                       children: [
                         OutlinedButton(
-                          onPressed: _submitting ? null : () => _fillDemo('client@taxi.local', 'client123'),
+                          onPressed: _submitting
+                              ? null
+                              : () =>
+                                  _fillDemo('client@taxi.local', 'client123'),
                           child: const Text('Demo Client'),
                         ),
                         OutlinedButton(
-                          onPressed: _submitting ? null : () => _fillDemo('driver@taxi.local', 'driver123'),
+                          onPressed: _submitting
+                              ? null
+                              : () =>
+                                  _fillDemo('driver@taxi.local', 'driver123'),
                           child: const Text('Demo Driver'),
                         ),
                         OutlinedButton(
-                          onPressed: _submitting ? null : () => _fillDemo('admin@taxi.local', 'admin123'),
+                          onPressed: _submitting
+                              ? null
+                              : () => _fillDemo('admin@taxi.local', 'admin123'),
                           child: const Text('Demo Admin'),
                         ),
                       ],
@@ -293,7 +308,9 @@ class _LoginPageState extends State<LoginPage> {
                       const SizedBox(height: 10),
                       Text(
                         _error!,
-                        style: const TextStyle(color: UiKitColors.danger, fontWeight: FontWeight.w600),
+                        style: const TextStyle(
+                            color: UiKitColors.danger,
+                            fontWeight: FontWeight.w600),
                       ),
                     ],
                     const SizedBox(height: 16),
@@ -334,7 +351,9 @@ class _RoleSwitcherShellState extends State<RoleSwitcherShell> {
   @override
   void initState() {
     super.initState();
-    _activeRole = widget.session.role == AppRole.admin ? AppRole.client : widget.session.role;
+    _activeRole = widget.session.role == AppRole.admin
+        ? AppRole.client
+        : widget.session.role;
   }
 
   List<AppRole> get _allowedRoles {
@@ -367,7 +386,8 @@ class _RoleSwitcherShellState extends State<RoleSwitcherShell> {
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
                     color: const Color(0xEEFFFFFF),
                     borderRadius: BorderRadius.circular(14),
@@ -379,7 +399,8 @@ class _RoleSwitcherShellState extends State<RoleSwitcherShell> {
                       ),
                     ],
                   ),
-                  child: Text('${widget.session.email} (${widget.session.role.label})'),
+                  child: Text(
+                      '${widget.session.email} (${widget.session.role.label})'),
                 ),
                 const SizedBox(width: 8),
                 Container(
@@ -401,7 +422,9 @@ class _RoleSwitcherShellState extends State<RoleSwitcherShell> {
                           (role) => ButtonSegment(
                             value: role,
                             label: Text(role.label),
-                            icon: Icon(role == AppRole.driver ? Icons.local_taxi_outlined : Icons.person_pin_circle_outlined),
+                            icon: Icon(role == AppRole.driver
+                                ? Icons.local_taxi_outlined
+                                : Icons.person_pin_circle_outlined),
                           ),
                         )
                         .toList(),
@@ -416,7 +439,8 @@ class _RoleSwitcherShellState extends State<RoleSwitcherShell> {
                       visualDensity: VisualDensity.compact,
                       side: const WidgetStatePropertyAll(BorderSide.none),
                       shape: WidgetStatePropertyAll(
-                        RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
                       ),
                     ),
                   ),
@@ -469,9 +493,11 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
   String? _errorMessage;
   BackendOrder? _activeOrder;
 
-  double get _baseFormulaPrice => _baseFare + (_distanceKm * _perKm) + (_durationMin * _perMinute);
+  double get _baseFormulaPrice =>
+      _baseFare + (_distanceKm * _perKm) + (_durationMin * _perMinute);
 
-  double get _finalPrice => _baseFormulaPrice * _tariffs[_selectedTariff].multiplier;
+  double get _finalPrice =>
+      _baseFormulaPrice * _tariffs[_selectedTariff].multiplier;
 
   double get _displayPrice => _activeOrder?.finalPrice ?? _finalPrice;
 
@@ -569,7 +595,8 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
         return;
       }
 
-      final arriving = await widget.apiClient.updateOrderStatus(assigned.id, 'DRIVER_ARRIVING');
+      final arriving = await widget.apiClient
+          .updateOrderStatus(assigned.id, 'DRIVER_ARRIVING');
 
       if (!mounted) {
         return;
@@ -610,10 +637,12 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     try {
       BackendOrder current = order;
       if (current.status != 'IN_PROGRESS') {
-        current = await widget.apiClient.updateOrderStatus(current.id, 'IN_PROGRESS');
+        current =
+            await widget.apiClient.updateOrderStatus(current.id, 'IN_PROGRESS');
       }
       if (current.status != 'COMPLETED') {
-        current = await widget.apiClient.updateOrderStatus(current.id, 'COMPLETED');
+        current =
+            await widget.apiClient.updateOrderStatus(current.id, 'COMPLETED');
       }
 
       if (!mounted) {
@@ -687,7 +716,8 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                     hintText: 'Search destination',
                     prefixIcon: Icon(Icons.search),
                     border: InputBorder.none,
-                    contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 16),
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 8, vertical: 16),
                   ),
                 ),
               ),
@@ -728,7 +758,8 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                     ),
                     const SizedBox(height: 16),
                     FilledButton(
-                      onPressed: () => setState(() => _step = ClientFlowStep.confirmRide),
+                      onPressed: () =>
+                          setState(() => _step = ClientFlowStep.confirmRide),
                       child: const Text('Set Destination'),
                     ),
                   ],
@@ -764,7 +795,8 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Tariff', style: Theme.of(context).textTheme.titleMedium),
+                  Text('Tariff',
+                      style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 12),
                   ...List.generate(_tariffs.length, (index) {
                     final tariff = _tariffs[index];
@@ -775,14 +807,18 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                          color: isSelected ? UiKitColors.primary : const Color(0xFFE5E7EB),
+                          color: isSelected
+                              ? UiKitColors.primary
+                              : const Color(0xFFE5E7EB),
                           width: 1.5,
                         ),
                       ),
                       child: ListTile(
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16)),
                         title: Text(tariff.name),
-                        subtitle: Text('x${tariff.multiplier.toStringAsFixed(2)} multiplier'),
+                        subtitle: Text(
+                            'x${tariff.multiplier.toStringAsFixed(2)} multiplier'),
                         trailing: Text('${price.toStringAsFixed(0)} KZT'),
                         onTap: () => setState(() => _selectedTariff = index),
                       ),
@@ -829,11 +865,14 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     if (_isSubmitting) ...[
-                      const CircularProgressIndicator(color: UiKitColors.primary),
+                      const CircularProgressIndicator(
+                          color: UiKitColors.primary),
                       const SizedBox(height: 14),
                     ],
                     Text(
-                      _isSubmitting ? 'Searching for driver...' : 'Search result',
+                      _isSubmitting
+                          ? 'Searching for driver...'
+                          : 'Search result',
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const SizedBox(height: 8),
@@ -871,7 +910,8 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                       onPressed: _isSubmitting ? null : _cancelOrderAndGoHome,
                       style: OutlinedButton.styleFrom(
                         minimumSize: const Size.fromHeight(56),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16)),
                       ),
                       child: const Text('Cancel'),
                     ),
@@ -923,14 +963,17 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('Aidos K.', style: Theme.of(context).textTheme.titleMedium),
+                              Text('Aidos K.',
+                                  style:
+                                      Theme.of(context).textTheme.titleMedium),
                               const SizedBox(height: 2),
                               const Text('Toyota Camry • 001 ABC'),
                             ],
                           ),
                         ),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
                           decoration: BoxDecoration(
                             color: const Color(0xFFD1FAE5),
                             borderRadius: BorderRadius.circular(14),
@@ -956,7 +999,9 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                       const SizedBox(height: 8),
                       Text(
                         _errorMessage!,
-                        style: const TextStyle(color: UiKitColors.danger, fontWeight: FontWeight.w600),
+                        style: const TextStyle(
+                            color: UiKitColors.danger,
+                            fontWeight: FontWeight.w600),
                       ),
                     ],
                     const SizedBox(height: 16),
@@ -979,7 +1024,9 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                         Expanded(
                           child: FilledButton(
                             onPressed: _isSubmitting ? null : _completeTrip,
-                            child: Text(_isSubmitting ? 'Updating...' : 'Complete Trip'),
+                            child: Text(_isSubmitting
+                                ? 'Updating...'
+                                : 'Complete Trip'),
                           ),
                         ),
                       ],
@@ -1006,13 +1053,15 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                 padding: const EdgeInsets.all(20),
                 child: Column(
                   children: [
-                    const Icon(Icons.check_circle, size: 56, color: UiKitColors.success),
+                    const Icon(Icons.check_circle,
+                        size: 56, color: UiKitColors.success),
                     const SizedBox(height: 12),
                     Text(
                       '${_displayPrice.toStringAsFixed(0)} KZT',
-                      style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
+                      style:
+                          Theme.of(context).textTheme.headlineMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
                     ),
                     const SizedBox(height: 6),
                     Text('Order: ${_activeOrder?.id ?? '-'}'),
@@ -1024,8 +1073,12 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                         return IconButton(
                           onPressed: () => setState(() => _rating = index + 1),
                           icon: Icon(
-                            filled ? Icons.star_rounded : Icons.star_border_rounded,
-                            color: filled ? const Color(0xFFF59E0B) : const Color(0xFF9CA3AF),
+                            filled
+                                ? Icons.star_rounded
+                                : Icons.star_border_rounded,
+                            color: filled
+                                ? const Color(0xFFF59E0B)
+                                : const Color(0xFF9CA3AF),
                           ),
                         );
                       }),
@@ -1195,10 +1248,15 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
   @override
   Widget build(BuildContext context) {
     final order = _activeOrder;
-    final canAccept = _online && order != null && (order.status == 'SEARCHING_DRIVER' || order.status == 'CREATED');
-    final canArriving = _online && order != null && order.status == 'DRIVER_ASSIGNED';
-    final canStart = _online && order != null && order.status == 'DRIVER_ARRIVING';
-    final canComplete = _online && order != null && order.status == 'IN_PROGRESS';
+    final canAccept = _online &&
+        order != null &&
+        (order.status == 'SEARCHING_DRIVER' || order.status == 'CREATED');
+    final canArriving =
+        _online && order != null && order.status == 'DRIVER_ASSIGNED';
+    final canStart =
+        _online && order != null && order.status == 'DRIVER_ARRIVING';
+    final canComplete =
+        _online && order != null && order.status == 'IN_PROGRESS';
 
     return Scaffold(
       appBar: AppBar(
@@ -1222,7 +1280,8 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Current order', style: Theme.of(context).textTheme.titleMedium),
+                  Text('Current order',
+                      style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 8),
                   if (order == null)
                     const Text('Белсенді тапсырыс жоқ.')
@@ -1231,7 +1290,8 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
                     const SizedBox(height: 4),
                     Text('Status: ${order.status}'),
                     const SizedBox(height: 4),
-                    Text('Final price: ${order.finalPrice.toStringAsFixed(0)} KZT'),
+                    Text(
+                        'Final price: ${order.finalPrice.toStringAsFixed(0)} KZT'),
                     const SizedBox(height: 4),
                     Text('Driver ID: ${order.driverId ?? '-'}'),
                   ],
@@ -1239,7 +1299,9 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
                     const SizedBox(height: 10),
                     Text(
                       _error!,
-                      style: const TextStyle(color: UiKitColors.danger, fontWeight: FontWeight.w600),
+                      style: const TextStyle(
+                          color: UiKitColors.danger,
+                          fontWeight: FontWeight.w600),
                     ),
                   ],
                 ],
@@ -1258,20 +1320,25 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
           ),
           const SizedBox(height: 8),
           FilledButton.tonal(
-            onPressed: _busy || !canArriving ? null : () => _updateStatus('DRIVER_ARRIVING'),
+            onPressed: _busy || !canArriving
+                ? null
+                : () => _updateStatus('DRIVER_ARRIVING'),
             child: const Text('Set Arriving'),
           ),
           const SizedBox(height: 8),
           FilledButton.tonal(
-            onPressed: _busy || !canStart ? null : () => _updateStatus('IN_PROGRESS'),
+            onPressed:
+                _busy || !canStart ? null : () => _updateStatus('IN_PROGRESS'),
             child: const Text('Start Ride'),
           ),
           const SizedBox(height: 8),
           OutlinedButton(
-            onPressed: _busy || !canComplete ? null : () => _updateStatus('COMPLETED'),
+            onPressed:
+                _busy || !canComplete ? null : () => _updateStatus('COMPLETED'),
             style: OutlinedButton.styleFrom(
               minimumSize: const Size.fromHeight(56),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16)),
             ),
             child: const Text('Complete Ride'),
           ),
@@ -1352,7 +1419,8 @@ class TaxiApiClient {
   String? _accessToken;
 
   String get baseUrl {
-    const String fromEnv = String.fromEnvironment('API_BASE_URL', defaultValue: '');
+    const String fromEnv =
+        String.fromEnvironment('API_BASE_URL', defaultValue: '');
     if (fromEnv.isNotEmpty) {
       return fromEnv;
     }
@@ -1380,7 +1448,8 @@ class TaxiApiClient {
 
     final decoded = _decodeAsMap(response);
     final token = (decoded['accessToken'] ?? '').toString();
-    final userMap = (decoded['user'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
+    final userMap = (decoded['user'] as Map?)?.cast<String, dynamic>() ??
+        <String, dynamic>{};
 
     if (token.isEmpty || userMap.isEmpty) {
       throw Exception('Invalid login response');
@@ -1473,7 +1542,8 @@ class TaxiApiClient {
     );
   }
 
-  Future<http.Response> _post(String path, {Map<String, dynamic>? body, bool includeAuth = true}) {
+  Future<http.Response> _post(String path,
+      {Map<String, dynamic>? body, bool includeAuth = true}) {
     return _client.post(
       Uri.parse('$baseUrl$path'),
       headers: _headers(includeAuth: includeAuth),
@@ -1481,7 +1551,8 @@ class TaxiApiClient {
     );
   }
 
-  Future<http.Response> _patch(String path, {Map<String, dynamic>? body, bool includeAuth = true}) {
+  Future<http.Response> _patch(String path,
+      {Map<String, dynamic>? body, bool includeAuth = true}) {
     return _client.patch(
       Uri.parse('$baseUrl$path'),
       headers: _headers(includeAuth: includeAuth),
@@ -1526,7 +1597,8 @@ class TaxiApiClient {
 
     return decoded
         .whereType<Map>()
-        .map((item) => item.map((key, value) => MapEntry(key.toString(), value)))
+        .map(
+            (item) => item.map((key, value) => MapEntry(key.toString(), value)))
         .toList(growable: false);
   }
 }
@@ -1534,66 +1606,121 @@ class TaxiApiClient {
 class _MapBackdrop extends StatelessWidget {
   const _MapBackdrop();
 
+  static const LatLng _pickupPoint = LatLng(43.238949, 76.889709);
+  static const LatLng _driverPoint = LatLng(43.246820, 76.906130);
+  static const LatLng _dropOffPoint = LatLng(43.255388, 76.928742);
+  static const LatLng _mapCenter = LatLng(43.245260, 76.910645);
+
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Color(0xFFDDEAFF),
-            Color(0xFFEEF2FF),
-            Color(0xFFEFF6FF),
+    return Stack(
+      children: [
+        FlutterMap(
+          options: const MapOptions(
+            initialCenter: _mapCenter,
+            initialZoom: 13.4,
+          ),
+          children: [
+            TileLayer(
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              userAgentPackageName: 'kz.taxi.project',
+            ),
+            PolylineLayer(
+              polylines: [
+                Polyline(
+                  points: [
+                    _pickupPoint,
+                    _driverPoint,
+                    _dropOffPoint,
+                  ],
+                  color: UiKitColors.primary,
+                  strokeWidth: 5,
+                ),
+              ],
+            ),
+            MarkerLayer(
+              markers: const [
+                Marker(
+                  point: _pickupPoint,
+                  width: 42,
+                  height: 42,
+                  child: _MapPin(
+                    icon: Icons.trip_origin,
+                    color: Color(0xFF0EA5E9),
+                  ),
+                ),
+                Marker(
+                  point: _driverPoint,
+                  width: 42,
+                  height: 42,
+                  child: _MapPin(
+                    icon: Icons.local_taxi,
+                    color: UiKitColors.primary,
+                  ),
+                ),
+                Marker(
+                  point: _dropOffPoint,
+                  width: 42,
+                  height: 42,
+                  child: _MapPin(
+                    icon: Icons.flag_rounded,
+                    color: UiKitColors.success,
+                  ),
+                ),
+              ],
+            ),
           ],
         ),
-      ),
-      child: CustomPaint(
-        painter: _GridRoadPainter(),
-        child: const SizedBox.expand(),
-      ),
+        const Positioned(
+          right: 8,
+          bottom: 8,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: Color(0xE6FFFFFF),
+              borderRadius: BorderRadius.all(Radius.circular(8)),
+            ),
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              child: Text(
+                '© OpenStreetMap contributors',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: Color(0xFF374151),
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
 
-class _GridRoadPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final minor = Paint()
-      ..color = const Color(0x1F2563EB)
-      ..strokeWidth = 1;
-    const step = 32.0;
-    for (double x = 0; x <= size.width; x += step) {
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), minor);
-    }
-    for (double y = 0; y <= size.height; y += step) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), minor);
-    }
+class _MapPin extends StatelessWidget {
+  const _MapPin({
+    required this.icon,
+    required this.color,
+  });
 
-    final route = Paint()
-      ..color = UiKitColors.primary
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeWidth = 5;
-    final path = Path()
-      ..moveTo(size.width * 0.15, size.height * 0.78)
-      ..quadraticBezierTo(
-        size.width * 0.35,
-        size.height * 0.58,
-        size.width * 0.54,
-        size.height * 0.62,
-      )
-      ..quadraticBezierTo(
-        size.width * 0.75,
-        size.height * 0.67,
-        size.width * 0.88,
-        size.height * 0.35,
-      );
-    canvas.drawPath(path, route);
-  }
+  final IconData icon;
+  final Color color;
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) {
-    return false;
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        shape: BoxShape.circle,
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x33000000),
+            blurRadius: 8,
+            offset: Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Icon(icon, color: color, size: 22),
+    );
   }
 }
