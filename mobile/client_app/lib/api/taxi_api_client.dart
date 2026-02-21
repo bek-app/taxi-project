@@ -59,6 +59,10 @@ class TaxiApiClient {
     return _parseAuthSession(_decodeAsMap(response), errorLabel: 'register');
   }
 
+  void setToken(String token) {
+    _accessToken = token;
+  }
+
   void clearAuth() {
     _accessToken = null;
   }

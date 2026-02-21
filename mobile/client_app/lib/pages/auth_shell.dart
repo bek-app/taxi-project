@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/taxi_api_client.dart';
 import '../i18n/app_i18n.dart';
@@ -25,22 +26,76 @@ class AuthShell extends StatefulWidget {
 class _AuthShellState extends State<AuthShell> {
   final TaxiApiClient _apiClient = TaxiApiClient();
   AuthSession? _session;
+  bool _loading = true;
 
-  void _onLoggedIn(AuthSession session) {
-    setState(() {
-      _session = session;
-    });
+  static const _kToken = 'session_token';
+  static const _kUserId = 'session_user_id';
+  static const _kEmail = 'session_email';
+  static const _kRole = 'session_role';
+
+  @override
+  void initState() {
+    super.initState();
+    _restoreSession();
   }
 
-  void _logout() {
+  Future<void> _restoreSession() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString(_kToken);
+      final userId = prefs.getString(_kUserId);
+      final email = prefs.getString(_kEmail);
+      final roleStr = prefs.getString(_kRole);
+
+      if (token != null &&
+          token.isNotEmpty &&
+          userId != null &&
+          email != null &&
+          roleStr != null) {
+        _apiClient.setToken(token);
+        if (mounted) {
+          setState(() {
+            _session = AuthSession(
+              token: token,
+              userId: userId,
+              email: email,
+              role: AppRoleX.fromBackend(roleStr),
+            );
+          });
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _onLoggedIn(AuthSession session) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kToken, session.token);
+    await prefs.setString(_kUserId, session.userId);
+    await prefs.setString(_kEmail, session.email);
+    await prefs.setString(_kRole, session.role.backendValue);
+    if (mounted) setState(() => _session = session);
+  }
+
+  Future<void> _logout() async {
     _apiClient.clearAuth();
-    setState(() {
-      _session = null;
-    });
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kToken);
+    await prefs.remove(_kUserId);
+    await prefs.remove(_kEmail);
+    await prefs.remove(_kRole);
+    if (mounted) setState(() => _session = null);
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     final session = _session;
     if (session == null) {
       return LoginPage(

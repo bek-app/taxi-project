@@ -30,7 +30,7 @@ class _LoginPageState extends State<LoginPage> {
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _confirmPasswordController =
       TextEditingController();
-  bool _registerMode = true;
+  bool _registerMode = false;
   AppRole _registerRole = AppRole.client;
   bool _submitting = false;
   bool _obscurePassword = true;
@@ -217,26 +217,36 @@ class _LoginPageState extends State<LoginPage> {
                                 color: UiKitColors.textSecondary),
                           ),
                           const SizedBox(height: 16),
-                          TextField(
-                            controller: _emailController,
-                            keyboardType: TextInputType.emailAddress,
-                            decoration: InputDecoration(
-                              labelText: i18n.t('email_label'),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          TextField(
-                            controller: _passwordController,
-                            obscureText: _obscurePassword,
-                            decoration: InputDecoration(
-                              labelText: i18n.t('password_label'),
-                              suffixIcon: IconButton(
-                                icon: Icon(_obscurePassword
-                                    ? Icons.visibility_off_outlined
-                                    : Icons.visibility_outlined),
-                                onPressed: () => setState(
-                                    () => _obscurePassword = !_obscurePassword),
-                              ),
+                          AutofillGroup(
+                            child: Column(
+                              children: [
+                                TextField(
+                                  controller: _emailController,
+                                  keyboardType: TextInputType.emailAddress,
+                                  autofillHints: const [AutofillHints.email],
+                                  decoration: InputDecoration(
+                                    labelText: i18n.t('email_label'),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                TextField(
+                                  controller: _passwordController,
+                                  obscureText: _obscurePassword,
+                                  autofillHints: isRegister
+                                      ? const [AutofillHints.newPassword]
+                                      : const [AutofillHints.password],
+                                  decoration: InputDecoration(
+                                    labelText: i18n.t('password_label'),
+                                    suffixIcon: IconButton(
+                                      icon: Icon(_obscurePassword
+                                          ? Icons.visibility_off_outlined
+                                          : Icons.visibility_outlined),
+                                      onPressed: () => setState(() =>
+                                          _obscurePassword = !_obscurePassword),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                           if (isRegister) ...[
@@ -244,6 +254,7 @@ class _LoginPageState extends State<LoginPage> {
                             TextField(
                               controller: _confirmPasswordController,
                               obscureText: _obscureConfirm,
+                              autofillHints: const [AutofillHints.newPassword],
                               decoration: InputDecoration(
                                 labelText: i18n.t('confirm_password_label'),
                                 suffixIcon: IconButton(
