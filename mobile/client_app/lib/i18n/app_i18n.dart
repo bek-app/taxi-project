@@ -71,6 +71,8 @@ class AppI18n {
       'final_price': 'Қорытынды: {price} KZT',
       'please_wait': 'Күтіңіз...',
       'searching_driver': 'Жүргізуші ізделуде...',
+      'waiting_driver_confirmation':
+          'Жүргізушіге ұсыныс жіберілді, растауын күтіп тұрмыз...',
       'search_result': 'Іздеу нәтижесі',
       'creating_order': 'Backend ішінде тапсырыс жасалуда...',
       'order_short': 'Тапсырыс: {id} • Күйі: {status}',
@@ -170,6 +172,8 @@ class AppI18n {
       'final_price': 'Итог: {price} KZT',
       'please_wait': 'Подождите...',
       'searching_driver': 'Ищем водителя...',
+      'waiting_driver_confirmation':
+          'Предложение отправлено водителю, ожидаем подтверждение...',
       'search_result': 'Результат поиска',
       'creating_order': 'Создаем заказ в backend...',
       'order_short': 'Заказ: {id} • Статус: {status}',

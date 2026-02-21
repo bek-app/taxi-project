@@ -638,15 +638,14 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
       return;
     }
 
-    if (order.status == 'DRIVER_ASSIGNED' ||
-        order.status == 'DRIVER_ARRIVING' ||
-        order.status == 'IN_PROGRESS') {
+    if (order.status == 'DRIVER_ARRIVING' || order.status == 'IN_PROGRESS') {
       _startOrderPolling();
       setState(() => _step = ClientFlowStep.tracking);
       return;
     }
 
-    if (order.status == 'SEARCHING_DRIVER') {
+    if (order.status == 'SEARCHING_DRIVER' ||
+        order.status == 'DRIVER_ASSIGNED') {
       _startOrderPolling();
       setState(() => _step = ClientFlowStep.searching);
       return;
@@ -1411,6 +1410,8 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
 
   Widget _buildSearchingScreen(BuildContext context) {
     final i18n = _i18n;
+    final isWaitingDriverConfirmation =
+        _activeOrder?.status == 'DRIVER_ASSIGNED';
 
     return Scaffold(
       body: Stack(
@@ -1439,7 +1440,9 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                     Text(
                       _isSubmitting
                           ? i18n.t('searching_driver')
-                          : i18n.t('search_result'),
+                          : (isWaitingDriverConfirmation
+                              ? i18n.t('waiting_driver_confirmation')
+                              : i18n.t('search_result')),
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const SizedBox(height: 8),
@@ -1473,8 +1476,13 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                           ? null
                           : (_activeOrder == null
                               ? _confirmRideAndRequestDriver
-                              : () => _searchDriverForCurrentOrder()),
-                      child: Text(i18n.t('retry_search')),
+                              : (isWaitingDriverConfirmation
+                                  ? () => _refreshActiveOrderFromServer(
+                                      showLoader: true)
+                                  : () => _searchDriverForCurrentOrder())),
+                      child: Text(isWaitingDriverConfirmation
+                          ? i18n.t('refresh_status')
+                          : i18n.t('retry_search')),
                     ),
                     const SizedBox(height: 8),
                     OutlinedButton(
