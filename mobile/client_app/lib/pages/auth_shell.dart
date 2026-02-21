@@ -8,6 +8,7 @@ import '../models/auth_session.dart';
 import 'client_flow_page.dart';
 import 'driver_flow_page.dart';
 import 'login_page.dart';
+import 'orders_page.dart';
 
 class AuthShell extends StatefulWidget {
   const AuthShell({
@@ -243,6 +244,17 @@ class _RoleSwitcherShellState extends State<RoleSwitcherShell> {
     );
   }
 
+  Future<void> _openOrdersPage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => OrdersPage(
+          apiClient: widget.apiClient,
+          lang: widget.lang,
+        ),
+      ),
+    );
+  }
+
   Widget _buildSidebarPanel(AppI18n i18n) {
     return Container(
       decoration: BoxDecoration(
@@ -302,6 +314,12 @@ class _RoleSwitcherShellState extends State<RoleSwitcherShell> {
             ),
           ),
           const SizedBox(height: 14),
+          FilledButton.tonalIcon(
+            onPressed: _openOrdersPage,
+            icon: const Icon(Icons.receipt_long_rounded),
+            label: Text(i18n.t('my_trips')),
+          ),
+          const SizedBox(height: 16),
           Text(
             i18n.t('register_as_label'),
             style: Theme.of(context).textTheme.titleMedium,

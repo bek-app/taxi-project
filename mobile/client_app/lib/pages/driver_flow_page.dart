@@ -32,16 +32,22 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
   BackendOrder? _activeOrder;
   List<BackendOrder> _orders = const [];
   Timer? _ordersPollingTimer;
+  StreamSubscription<Position>? _positionSubscription;
+  bool _isSyncingDriverLocation = false;
+  DateTime? _lastDriverLocationSyncAt;
+  Position? _lastSyncedDriverPosition;
 
   @override
   void initState() {
     super.initState();
     _refreshOrders();
+    unawaited(_startLocationTracking());
   }
 
   @override
   void dispose() {
     _ordersPollingTimer?.cancel();
+    _positionSubscription?.cancel();
     super.dispose();
   }
 
@@ -106,7 +112,11 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
       if (value) {
         _startOrdersPolling();
         unawaited(_refreshOrders(showLoader: false));
-        unawaited(_updateOwnLocationSilently());
+        if (_currentPosition != null) {
+          unawaited(_syncDriverLocation(_currentPosition!, force: true));
+        } else {
+          unawaited(_updateOwnLocationSilently());
+        }
       } else {
         _ordersPollingTimer?.cancel();
       }
@@ -137,11 +147,39 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
     );
   }
 
-  Future<void> _updateOwnLocationSilently() async {
+  Future<void> _startLocationTracking() async {
     try {
-      await _updateOwnLocation();
+      await _ensureLocationPermission();
+      final initial = await _readCurrentPosition();
       if (!mounted) return;
-      setState(() {});
+
+      setState(() {
+        _currentPosition = initial;
+        _error = null;
+      });
+      unawaited(_syncDriverLocation(initial, force: true));
+
+      await _positionSubscription?.cancel();
+      const settings = LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 7,
+      );
+      _positionSubscription =
+          Geolocator.getPositionStream(locationSettings: settings).listen(
+        (position) {
+          if (!mounted) return;
+          setState(() {
+            _currentPosition = position;
+          });
+          unawaited(_syncDriverLocation(position));
+        },
+        onError: (_) {
+          if (!mounted) return;
+          setState(() {
+            _error = AppI18n(widget.lang).t('location_unknown');
+          });
+        },
+      );
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -150,7 +188,7 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
     }
   }
 
-  Future<void> _updateOwnLocation() async {
+  Future<void> _ensureLocationPermission() async {
     final i18n = AppI18n(widget.lang);
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
@@ -166,18 +204,88 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
         permission == LocationPermission.deniedForever) {
       throw Exception(i18n.t('location_permission_denied'));
     }
+  }
 
-    final position = await Geolocator.getCurrentPosition(
+  Future<Position> _readCurrentPosition() {
+    return Geolocator.getCurrentPosition(
       locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.high,
       ),
     ).timeout(const Duration(seconds: 8));
-    _currentPosition = position;
+  }
 
-    await widget.apiClient.updateDriverLocation(
-      latitude: position.latitude,
-      longitude: position.longitude,
+  bool _shouldSyncDriverLocation(Position position, {required bool force}) {
+    if (!_online) {
+      return false;
+    }
+    if (force) {
+      return true;
+    }
+
+    final lastAt = _lastDriverLocationSyncAt;
+    final lastPosition = _lastSyncedDriverPosition;
+    if (lastAt == null || lastPosition == null) {
+      return true;
+    }
+
+    final elapsedSeconds = DateTime.now().difference(lastAt).inSeconds;
+    if (elapsedSeconds >= 10) {
+      return true;
+    }
+
+    final movedMeters = Geolocator.distanceBetween(
+      position.latitude,
+      position.longitude,
+      lastPosition.latitude,
+      lastPosition.longitude,
     );
+    return movedMeters >= 25;
+  }
+
+  Future<void> _syncDriverLocation(
+    Position position, {
+    bool force = false,
+  }) async {
+    if (_isSyncingDriverLocation ||
+        !_shouldSyncDriverLocation(position, force: force)) {
+      return;
+    }
+
+    _isSyncingDriverLocation = true;
+    try {
+      await widget.apiClient.updateDriverLocation(
+        latitude: position.latitude,
+        longitude: position.longitude,
+      );
+      _lastDriverLocationSyncAt = DateTime.now();
+      _lastSyncedDriverPosition = position;
+    } catch (_) {
+      // Keep background sync silent; manual refresh still surfaces hard errors.
+    } finally {
+      _isSyncingDriverLocation = false;
+    }
+  }
+
+  Future<void> _updateOwnLocationSilently() async {
+    try {
+      await _updateOwnLocation();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = error.toString();
+      });
+    }
+  }
+
+  Future<void> _updateOwnLocation() async {
+    await _ensureLocationPermission();
+    final position = await _readCurrentPosition();
+    if (!mounted) return;
+    setState(() {
+      _currentPosition = position;
+      _error = null;
+    });
+    await _syncDriverLocation(position, force: true);
   }
 
   Future<void> _refreshOrders({bool showLoader = true}) async {
