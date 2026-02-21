@@ -30,7 +30,6 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
   String? _error;
   Position? _currentPosition;
   BackendOrder? _activeOrder;
-  List<BackendOrder> _orders = const [];
   Timer? _ordersPollingTimer;
   StreamSubscription<Position>? _positionSubscription;
   bool _isSyncingDriverLocation = false;
@@ -296,7 +295,6 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
       if (!mounted) return;
 
       setState(() {
-        _orders = orders;
         _activeOrder = candidate;
       });
     }
@@ -373,6 +371,48 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
     });
   }
 
+  Widget _buildMapActionsOverlay(AppI18n i18n) {
+    final onlineBg = _online ? UiKitColors.success : const Color(0xFF64748B);
+    return Positioned(
+      top: 12,
+      right: 12,
+      child: Column(
+        children: [
+          FloatingActionButton.small(
+            heroTag: 'driver-online-toggle-fab',
+            onPressed: _busy ? null : () => _toggleOnline(!_online),
+            backgroundColor: onlineBg,
+            foregroundColor: Colors.white,
+            tooltip: i18n.t('online_mode'),
+            child: _busy
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : Icon(
+                    _online
+                        ? Icons.cloud_done_rounded
+                        : Icons.cloud_off_rounded,
+                  ),
+          ),
+          const SizedBox(height: 8),
+          FloatingActionButton.small(
+            heroTag: 'driver-refresh-location-fab',
+            onPressed: _busy ? null : () => _runWithLoader(_updateOwnLocation),
+            backgroundColor: Colors.white,
+            foregroundColor: UiKitColors.primary,
+            tooltip: i18n.t('refresh_location'),
+            child: const Icon(Icons.my_location_rounded),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final i18n = AppI18n(widget.lang);
@@ -392,6 +432,7 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
               driverPoint: _currentLatLng,
             ),
           ),
+          _buildMapActionsOverlay(i18n),
           SafeArea(
             child: Align(
               alignment: Alignment.bottomCenter,
@@ -415,29 +456,24 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
                   children: [
                     Row(
                       children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                i18n.t('online_mode'),
-                                style: Theme.of(context).textTheme.titleMedium,
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                i18n.t('online_subtitle'),
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall
-                                    ?.copyWith(
-                                        color: UiKitColors.textSecondary),
-                              ),
-                            ],
-                          ),
+                        Icon(
+                          _online
+                              ? Icons.check_circle_rounded
+                              : Icons.remove_circle_outline_rounded,
+                          size: 16,
+                          color: _online
+                              ? UiKitColors.success
+                              : UiKitColors.textSecondary,
                         ),
-                        Switch(
-                          value: _online,
-                          onChanged: _busy ? null : _toggleOnline,
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            i18n.t('online_subtitle'),
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(color: UiKitColors.textSecondary),
+                          ),
                         ),
                       ],
                     ),
@@ -488,29 +524,12 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
                         ),
                       ),
                     ],
-                    const SizedBox(height: 10),
-                    _buildOrdersList(i18n),
                     const SizedBox(height: 12),
                     _buildStatusAction(i18n, order),
                     const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: FilledButton.tonal(
-                            onPressed: _busy ? null : () => _refreshOrders(),
-                            child: Text(i18n.t('refresh_orders')),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: FilledButton.tonal(
-                            onPressed: _busy
-                                ? null
-                                : () => _runWithLoader(_updateOwnLocation),
-                            child: Text(i18n.t('refresh_location')),
-                          ),
-                        ),
-                      ],
+                    FilledButton.tonal(
+                      onPressed: _busy ? null : () => _refreshOrders(),
+                      child: Text(i18n.t('refresh_orders')),
                     ),
                   ],
                 ),
@@ -522,99 +541,14 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
     );
   }
 
-  Widget _buildOrdersList(AppI18n i18n) {
-    if (_orders.isEmpty) {
-      return Text(
-        i18n.t('orders_list_empty'),
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: UiKitColors.textSecondary,
-            ),
-      );
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          i18n.t('orders_list_title'),
-          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
-        ),
-        const SizedBox(height: 6),
-        SizedBox(
-          height: 120,
-          child: ListView.separated(
-            itemCount: _orders.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 6),
-            itemBuilder: (context, index) {
-              final order = _orders[index];
-              final isSelected = _activeOrder?.id == order.id;
-              final isTerminal = _isTerminalOrder(order);
-              final borderColor =
-                  isSelected ? UiKitColors.primary : const Color(0xFFE5E7EB);
-
-              return InkWell(
-                onTap: () => setState(() => _activeOrder = order),
-                borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: borderColor),
-                    color: isSelected
-                        ? const Color(0xFFEFF6FF)
-                        : const Color(0xFFF8FAFC),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          '#${order.id.substring(0, 8)}',
-                          style:
-                              Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                        ),
-                      ),
-                      Text(
-                        localizedOrderStatus(widget.lang, order.status),
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: isTerminal
-                                  ? UiKitColors.textSecondary
-                                  : UiKitColors.success,
-                              fontWeight: FontWeight.w600,
-                            ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        '${order.finalPrice.toStringAsFixed(0)} ₸',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: UiKitColors.textSecondary,
-                              fontWeight: FontWeight.w600,
-                            ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
   Widget _buildStatusAction(AppI18n i18n, BackendOrder? order) {
-    if (!_online) {
-      return FilledButton(
-        onPressed: _busy ? null : () => _toggleOnline(true),
-        child: Text(_busy ? i18n.t('loading') : i18n.t('online_mode')),
-      );
-    }
-
     if (order == null) {
+      if (!_online) {
+        return FilledButton(
+          onPressed: _busy ? null : () => _toggleOnline(true),
+          child: Text(_busy ? i18n.t('loading') : i18n.t('online_mode')),
+        );
+      }
       return FilledButton.tonal(
         onPressed: _busy ? null : () => _refreshOrders(),
         child: Text(_busy ? i18n.t('loading') : i18n.t('refresh_orders')),
