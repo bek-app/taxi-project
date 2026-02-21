@@ -11,6 +11,7 @@ class MapBackdrop extends StatefulWidget {
     this.dropoffPoint,
     this.driverPoint,
     this.routePolylinePoints,
+    this.onMapTap,
     super.key,
   });
 
@@ -21,6 +22,7 @@ class MapBackdrop extends StatefulWidget {
   final LatLng? dropoffPoint;
   final LatLng? driverPoint;
   final List<LatLng>? routePolylinePoints;
+  final ValueChanged<LatLng>? onMapTap;
 
   @override
   State<MapBackdrop> createState() => _MapBackdropState();
@@ -129,6 +131,7 @@ class _MapBackdropState extends State<MapBackdrop> {
           options: MapOptions(
             initialCenter: center,
             initialZoom: widget.currentLocation == null ? 12.0 : 14.5,
+            onTap: (tapPosition, point) => widget.onMapTap?.call(point),
           ),
           children: [
             TileLayer(

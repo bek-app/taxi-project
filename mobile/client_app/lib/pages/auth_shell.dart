@@ -137,6 +137,7 @@ class RoleSwitcherShell extends StatefulWidget {
 }
 
 class _RoleSwitcherShellState extends State<RoleSwitcherShell> {
+  static const double _sidebarWidth = 292;
   late AppRole _activeRole;
 
   @override
@@ -154,142 +155,298 @@ class _RoleSwitcherShellState extends State<RoleSwitcherShell> {
     return [widget.session.role];
   }
 
+  String get _displayName {
+    final email = widget.session.email.trim();
+    if (email.isEmpty) {
+      return 'User';
+    }
+
+    final at = email.indexOf('@');
+    final raw = at > 0 ? email.substring(0, at) : email;
+    if (raw.isEmpty) {
+      return email;
+    }
+    if (raw.length == 1) {
+      return raw.toUpperCase();
+    }
+    return '${raw[0].toUpperCase()}${raw.substring(1)}';
+  }
+
+  Widget _buildMainContent() {
+    return IndexedStack(
+      index: _activeRole == AppRole.driver ? 1 : 0,
+      children: [
+        ClientFlowPage(
+          apiClient: widget.apiClient,
+          session: widget.session,
+          lang: widget.lang,
+        ),
+        DriverFlowPage(
+          apiClient: widget.apiClient,
+          lang: widget.lang,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildHeaderBadge() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xEBFFFFFF),
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x14000000),
+            blurRadius: 16,
+            offset: Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _displayName,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          Text(
+            _activeRole.label(widget.lang),
+            style: const TextStyle(
+              fontSize: 11,
+              color: Color(0xFF64748B),
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRoleSwitcher() {
+    final allowedRoles = _allowedRoles;
+    return SegmentedButton<AppRole>(
+      segments: allowedRoles
+          .map(
+            (role) => ButtonSegment(
+              value: role,
+              label: Text(role.label(widget.lang)),
+              icon: Icon(
+                role == AppRole.driver
+                    ? Icons.local_taxi_outlined
+                    : Icons.person_pin_circle_outlined,
+              ),
+            ),
+          )
+          .toList(),
+      selected: <AppRole>{_activeRole},
+      onSelectionChanged: (selected) {
+        if (selected.isNotEmpty) {
+          setState(() => _activeRole = selected.first);
+        }
+      },
+      showSelectedIcon: false,
+      style: const ButtonStyle(
+        visualDensity: VisualDensity.compact,
+        side: WidgetStatePropertyAll(BorderSide.none),
+      ),
+    );
+  }
+
+  Widget _buildLanguageSwitcher() {
+    return SegmentedButton<AppLang>(
+      segments: AppLang.values
+          .map(
+            (lang) => ButtonSegment<AppLang>(
+              value: lang,
+              label: Text(lang.code),
+            ),
+          )
+          .toList(),
+      selected: <AppLang>{widget.lang},
+      onSelectionChanged: (selection) {
+        if (selection.isNotEmpty) {
+          widget.onLangChanged(selection.first);
+        }
+      },
+      showSelectedIcon: false,
+      style: const ButtonStyle(
+        visualDensity: VisualDensity.compact,
+        side: WidgetStatePropertyAll(BorderSide.none),
+      ),
+    );
+  }
+
+  Widget _buildSidebarPanel(AppI18n i18n) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xEBFFFFFF),
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x14000000),
+            blurRadius: 20,
+            offset: Offset(0, 8),
+          ),
+        ],
+      ),
+      child: ListView(
+        padding: const EdgeInsets.all(12),
+        children: [
+          Text(
+            i18n.t('app_title'),
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _displayName,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  widget.session.email,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: Color(0xFF64748B),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _activeRole.label(widget.lang),
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: Color(0xFF0F766E),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            i18n.t('register_as_label'),
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          _buildRoleSwitcher(),
+          const SizedBox(height: 14),
+          Text(
+            i18n.t('language'),
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          _buildLanguageSwitcher(),
+          const SizedBox(height: 16),
+          OutlinedButton.icon(
+            onPressed: widget.onLogout,
+            icon: const Icon(Icons.logout),
+            label: Text(i18n.t('logout')),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final i18n = AppI18n(widget.lang);
-    final allowedRoles = _allowedRoles;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= 1080;
+        final sidebar = _buildSidebarPanel(i18n);
+        final headerBadge = _buildHeaderBadge();
 
-    return Stack(
-      children: [
-        IndexedStack(
-          index: _activeRole == AppRole.driver ? 1 : 0,
-          children: [
-            ClientFlowPage(
-              apiClient: widget.apiClient,
-              session: widget.session,
-              lang: widget.lang,
+        if (isWide) {
+          return Scaffold(
+            body: SafeArea(
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: _sidebarWidth,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
+                      child: sidebar,
+                    ),
+                  ),
+                  Expanded(
+                    child: Stack(
+                      children: [
+                        Positioned.fill(child: _buildMainContent()),
+                        Positioned(
+                          top: 12,
+                          left: 12,
+                          child: headerBadge,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
-            DriverFlowPage(
-              apiClient: widget.apiClient,
-              lang: widget.lang,
-            ),
-          ],
-        ),
-        SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-            child: Align(
-              alignment: Alignment.topRight,
-              child: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: const Color(0xEBFFFFFF),
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: const [
-                    BoxShadow(
-                      color: Color(0x1F000000),
-                      blurRadius: 20,
-                      offset: Offset(0, 8),
-                    ),
-                  ],
-                ),
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 10,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFC),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        i18n.t(
-                          'signed_role',
-                          {
-                            'email': widget.session.email,
-                            'role': widget.session.role.label(widget.lang),
-                          },
-                        ),
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF1F5F9),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: SegmentedButton<AppRole>(
-                        segments: allowedRoles
-                            .map(
-                              (role) => ButtonSegment(
-                                value: role,
-                                label: Text(role.label(widget.lang)),
-                                icon: Icon(
-                                  role == AppRole.driver
-                                      ? Icons.local_taxi_outlined
-                                      : Icons.person_pin_circle_outlined,
-                                ),
-                              ),
-                            )
-                            .toList(),
-                        selected: <AppRole>{_activeRole},
-                        onSelectionChanged: (selected) {
-                          if (selected.isNotEmpty) {
-                            setState(() => _activeRole = selected.first);
-                          }
-                        },
-                        showSelectedIcon: false,
-                        style: const ButtonStyle(
-                          visualDensity: VisualDensity.compact,
-                          side: WidgetStatePropertyAll(BorderSide.none),
-                        ),
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF1F5F9),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: SegmentedButton<AppLang>(
-                        segments: AppLang.values
-                            .map(
-                              (lang) => ButtonSegment<AppLang>(
-                                value: lang,
-                                label: Text(lang.code),
-                              ),
-                            )
-                            .toList(),
-                        selected: <AppLang>{widget.lang},
-                        onSelectionChanged: (selection) {
-                          if (selection.isNotEmpty) {
-                            widget.onLangChanged(selection.first);
-                          }
-                        },
-                        showSelectedIcon: false,
-                        style: const ButtonStyle(
-                          visualDensity: VisualDensity.compact,
-                          side: WidgetStatePropertyAll(BorderSide.none),
-                        ),
-                      ),
-                    ),
-                    IconButton.filledTonal(
-                      onPressed: widget.onLogout,
-                      icon: const Icon(Icons.logout),
-                      tooltip: i18n.t('logout'),
-                    ),
-                  ],
-                ),
+          );
+        }
+
+        return Scaffold(
+          drawer: Drawer(
+            width: _sidebarWidth,
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: sidebar,
               ),
             ),
           ),
-        ),
-      ],
+          body: Stack(
+            children: [
+              Positioned.fill(child: _buildMainContent()),
+              SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                  child: Row(
+                    children: [
+                      Builder(
+                        builder: (context) {
+                          return IconButton.filledTonal(
+                            onPressed: () => Scaffold.of(context).openDrawer(),
+                            icon: const Icon(Icons.menu_rounded),
+                            tooltip: 'Menu',
+                          );
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: headerBadge,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

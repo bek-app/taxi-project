@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
@@ -16,7 +17,7 @@ import '../models/route_snapshot.dart';
 import '../models/tariff.dart';
 import '../widgets/map_backdrop.dart';
 
-enum ClientFlowStep { home, confirmRide, searching, tracking, completed }
+enum ClientFlowStep { home, searching, tracking, completed }
 
 class ClientFlowPage extends StatefulWidget {
   const ClientFlowPage({
@@ -75,6 +76,9 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
   bool _isRouteLoading = false;
   bool _isRouteFallback = false;
   String? _routeKey;
+  bool _isReverseGeocodingPickup = false;
+  int _pickupGeocodeToken = 0;
+  int _destinationGeocodeToken = 0;
 
   LatLng? get _currentLatLng {
     final p = _currentPosition;
@@ -218,6 +222,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
             _locationError = null;
             _isLocating = false;
           });
+          _autofillPickupFromCurrentLocation();
           _scheduleRouteRefresh();
         },
         onError: (_) {
