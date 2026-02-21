@@ -1425,25 +1425,51 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
               routePolylinePoints: _routePolylinePoints,
             ),
           ),
-          Center(
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
+          SafeArea(
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: Container(
+                margin: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x1A000000),
+                      blurRadius: 26,
+                      offset: Offset(0, 10),
+                    ),
+                  ],
+                ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    if (_isSubmitting) ...[
-                      const CircularProgressIndicator(
-                          color: UiKitColors.primary),
-                      const SizedBox(height: 14),
-                    ],
-                    Text(
-                      _isSubmitting
-                          ? i18n.t('searching_driver')
-                          : (isWaitingDriverConfirmation
-                              ? i18n.t('waiting_driver_confirmation')
-                              : i18n.t('search_result')),
-                      style: Theme.of(context).textTheme.titleMedium,
+                    Row(
+                      children: [
+                        if (_isSubmitting) ...[
+                          const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: UiKitColors.primary,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                        Expanded(
+                          child: Text(
+                            _isSubmitting
+                                ? i18n.t('searching_driver')
+                                : (isWaitingDriverConfirmation
+                                    ? i18n.t('waiting_driver_confirmation')
+                                    : i18n.t('search_result')),
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 8),
                     Text(
@@ -1454,45 +1480,63 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                               'status': localizedOrderStatus(
                                   widget.lang, _activeOrder!.status),
                             }),
-                      textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: UiKitColors.textSecondary,
                           ),
                     ),
                     if (_errorMessage != null) ...[
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 8),
                       Text(
                         _errorMessage!,
-                        textAlign: TextAlign.center,
                         style: const TextStyle(
                           color: UiKitColors.danger,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
                     ],
-                    const SizedBox(height: 16),
-                    FilledButton(
-                      onPressed: _isSubmitting
-                          ? null
-                          : (_activeOrder == null
-                              ? _confirmRideAndRequestDriver
-                              : (isWaitingDriverConfirmation
-                                  ? () => _refreshActiveOrderFromServer(
-                                      showLoader: true)
-                                  : () => _searchDriverForCurrentOrder())),
-                      child: Text(isWaitingDriverConfirmation
-                          ? i18n.t('refresh_status')
-                          : i18n.t('retry_search')),
-                    ),
-                    const SizedBox(height: 8),
-                    OutlinedButton(
-                      onPressed: _isSubmitting ? null : _cancelOrderAndGoHome,
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size.fromHeight(56),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16)),
-                      ),
-                      child: Text(i18n.t('cancel')),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: FilledButton(
+                            onPressed: _isSubmitting
+                                ? null
+                                : (_activeOrder == null
+                                    ? _confirmRideAndRequestDriver
+                                    : (isWaitingDriverConfirmation
+                                        ? () => _refreshActiveOrderFromServer(
+                                              showLoader: true,
+                                            )
+                                        : () =>
+                                            _searchDriverForCurrentOrder())),
+                            style: FilledButton.styleFrom(
+                              minimumSize: const Size.fromHeight(56),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                            child: Text(
+                              isWaitingDriverConfirmation
+                                  ? i18n.t('refresh_status')
+                                  : i18n.t('retry_search'),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed:
+                                _isSubmitting ? null : _cancelOrderAndGoHome,
+                            style: OutlinedButton.styleFrom(
+                              minimumSize: const Size.fromHeight(56),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                            child: Text(i18n.t('cancel')),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),

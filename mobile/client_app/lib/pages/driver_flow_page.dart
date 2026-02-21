@@ -2,11 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../api/taxi_api_client.dart';
 import '../core/colors.dart';
 import '../i18n/app_i18n.dart';
 import '../models/backend_order.dart';
+import '../widgets/map_backdrop.dart';
 
 class DriverFlowPage extends StatefulWidget {
   const DriverFlowPage({
@@ -42,6 +44,28 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
     super.dispose();
   }
 
+  LatLng? get _currentLatLng {
+    final p = _currentPosition;
+    if (p == null) return null;
+    return LatLng(p.latitude, p.longitude);
+  }
+
+  LatLng? get _pickupPoint {
+    final order = _activeOrder;
+    if (order?.pickupLatitude == null || order?.pickupLongitude == null) {
+      return null;
+    }
+    return LatLng(order!.pickupLatitude!, order.pickupLongitude!);
+  }
+
+  LatLng? get _dropoffPoint {
+    final order = _activeOrder;
+    if (order?.dropoffLatitude == null || order?.dropoffLongitude == null) {
+      return null;
+    }
+    return LatLng(order!.dropoffLatitude!, order.dropoffLongitude!);
+  }
+
   Future<void> _runWithLoader(Future<void> Function() action) async {
     setState(() {
       _busy = true;
@@ -64,11 +88,13 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
   }
 
   Future<void> _toggleOnline(bool value) async {
-    await _runWithLoader(() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+
+    try {
       await widget.apiClient.setDriverAvailability(value);
-      if (value) {
-        await _updateOwnLocation();
-      }
 
       if (!mounted) return;
 
@@ -78,7 +104,8 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
 
       if (value) {
         _startOrdersPolling();
-        await _refreshOrders(showLoader: false);
+        unawaited(_refreshOrders(showLoader: false));
+        unawaited(_updateOwnLocationSilently());
       } else {
         _ordersPollingTimer?.cancel();
         if (!mounted) return;
@@ -86,7 +113,18 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
           _activeOrder = null;
         });
       }
-    });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = error.toString();
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+        });
+      }
+    }
   }
 
   void _startOrdersPolling() {
@@ -100,6 +138,19 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
         unawaited(_refreshOrders(showLoader: false));
       },
     );
+  }
+
+  Future<void> _updateOwnLocationSilently() async {
+    try {
+      await _updateOwnLocation();
+      if (!mounted) return;
+      setState(() {});
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = error.toString();
+      });
+    }
   }
 
   Future<void> _updateOwnLocation() async {
@@ -123,7 +174,7 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
       locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.high,
       ),
-    );
+    ).timeout(const Duration(seconds: 8));
     _currentPosition = position;
 
     await widget.apiClient.updateDriverLocation(
@@ -157,7 +208,14 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
     if (showLoader) {
       await _runWithLoader(action);
     } else {
-      await action();
+      try {
+        await action();
+      } catch (error) {
+        if (!mounted) return;
+        setState(() {
+          _error = error.toString();
+        });
+      }
     }
   }
 
@@ -195,120 +253,194 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
   Widget build(BuildContext context) {
     final i18n = AppI18n(widget.lang);
     final order = _activeOrder;
-    final canAccept =
-        _online && order != null && order.status == 'DRIVER_ASSIGNED';
-    final canStart =
-        _online && order != null && order.status == 'DRIVER_ARRIVING';
-    final canComplete =
-        _online && order != null && order.status == 'IN_PROGRESS';
 
     return Scaffold(
       appBar: AppBar(
         title: Text(i18n.t('driver_workspace')),
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      body: Stack(
         children: [
-          const SizedBox(height: 56),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text(i18n.t('online_mode')),
-            subtitle: Text(i18n.t('online_subtitle')),
-            value: _online,
-            onChanged: _busy ? null : _toggleOnline,
+          Positioned.fill(
+            child: MapBackdrop(
+              currentLocation: _currentLatLng,
+              pickupPoint: _pickupPoint,
+              dropoffPoint: _dropoffPoint,
+              driverPoint: _currentLatLng,
+            ),
           ),
-          const SizedBox(height: 8),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    i18n.t('current_order'),
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 8),
-                  if (order == null)
-                    Text(i18n.t('no_active_order'))
-                  else ...[
-                    Text(i18n.t('order_id', {'id': order.id})),
-                    const SizedBox(height: 4),
-                    Text(
-                      i18n.t(
-                        'status',
-                        {
-                          'value':
-                              localizedOrderStatus(widget.lang, order.status)
-                        },
-                      ),
+          SafeArea(
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: Container(
+                margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x1A000000),
+                      blurRadius: 26,
+                      offset: Offset(0, 10),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      i18n.t(
-                        'final_price_label',
-                        {'value': order.finalPrice.toStringAsFixed(0)},
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(i18n.t('driver_id', {'value': order.driverId ?? '-'})),
                   ],
-                  if (_error != null) ...[
-                    const SizedBox(height: 10),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                i18n.t('online_mode'),
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                i18n.t('online_subtitle'),
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(
+                                        color: UiKitColors.textSecondary),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Switch(
+                          value: _online,
+                          onChanged: _busy ? null : _toggleOnline,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
                     Text(
-                      _error!,
-                      style: const TextStyle(
+                      i18n.t('current_order'),
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 6),
+                    if (order == null)
+                      Text(i18n.t('no_active_order'))
+                    else ...[
+                      Text(i18n.t('order_id', {'id': order.id})),
+                      const SizedBox(height: 4),
+                      Text(
+                        i18n.t(
+                          'status',
+                          {
+                            'value':
+                                localizedOrderStatus(widget.lang, order.status)
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        i18n.t(
+                          'final_price_label',
+                          {'value': order.finalPrice.toStringAsFixed(0)},
+                        ),
+                      ),
+                    ],
+                    if (_currentPosition != null) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        'GPS: ${_currentPosition!.latitude.toStringAsFixed(5)}, ${_currentPosition!.longitude.toStringAsFixed(5)}',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: UiKitColors.textSecondary,
+                            ),
+                      ),
+                    ],
+                    if (_error != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        _error!,
+                        style: const TextStyle(
                           color: UiKitColors.danger,
-                          fontWeight: FontWeight.w600),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    _buildStatusAction(i18n, order),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: FilledButton.tonal(
+                            onPressed: _busy ? null : () => _refreshOrders(),
+                            child: Text(i18n.t('refresh_orders')),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: FilledButton.tonal(
+                            onPressed: _busy
+                                ? null
+                                : () => _runWithLoader(_updateOwnLocation),
+                            child: Text(i18n.t('refresh_location')),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
-                ],
+                ),
               ),
             ),
           ),
-          const SizedBox(height: 12),
-          FilledButton.tonal(
-            onPressed: _busy ? null : () => _refreshOrders(),
-            child: Text(_busy ? i18n.t('loading') : i18n.t('refresh_orders')),
-          ),
-          const SizedBox(height: 8),
-          FilledButton.tonal(
-            onPressed: _busy ? null : () => _runWithLoader(_updateOwnLocation),
-            child: Text(i18n.t('refresh_location')),
-          ),
-          if (_currentPosition != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              'GPS: ${_currentPosition!.latitude.toStringAsFixed(5)}, ${_currentPosition!.longitude.toStringAsFixed(5)}',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: UiKitColors.textSecondary,
-                  ),
-            ),
-          ],
-          const SizedBox(height: 8),
-          FilledButton(
-            onPressed: _busy || !canAccept ? null : _acceptRide,
-            child: Text(i18n.t('accept_ride')),
-          ),
-          const SizedBox(height: 8),
-          FilledButton.tonal(
-            onPressed:
-                _busy || !canStart ? null : () => _updateStatus('IN_PROGRESS'),
-            child: Text(i18n.t('start_ride')),
-          ),
-          const SizedBox(height: 8),
-          OutlinedButton(
-            onPressed:
-                _busy || !canComplete ? null : () => _updateStatus('COMPLETED'),
-            style: OutlinedButton.styleFrom(
-              minimumSize: const Size.fromHeight(56),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16)),
-            ),
-            child: Text(i18n.t('complete_ride')),
-          ),
         ],
       ),
+    );
+  }
+
+  Widget _buildStatusAction(AppI18n i18n, BackendOrder? order) {
+    if (!_online) {
+      return FilledButton(
+        onPressed: _busy ? null : () => _toggleOnline(true),
+        child: Text(_busy ? i18n.t('loading') : i18n.t('online_mode')),
+      );
+    }
+
+    if (order == null) {
+      return FilledButton.tonal(
+        onPressed: _busy ? null : () => _refreshOrders(),
+        child: Text(_busy ? i18n.t('loading') : i18n.t('refresh_orders')),
+      );
+    }
+
+    if (order.status == 'DRIVER_ASSIGNED') {
+      return FilledButton(
+        onPressed: _busy ? null : _acceptRide,
+        child: Text(_busy ? i18n.t('loading') : i18n.t('accept_ride')),
+      );
+    }
+
+    if (order.status == 'DRIVER_ARRIVING') {
+      return FilledButton(
+        onPressed: _busy ? null : () => _updateStatus('IN_PROGRESS'),
+        child: Text(_busy ? i18n.t('loading') : i18n.t('start_ride')),
+      );
+    }
+
+    if (order.status == 'IN_PROGRESS') {
+      return OutlinedButton(
+        onPressed: _busy ? null : () => _updateStatus('COMPLETED'),
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size.fromHeight(56),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ),
+        child: Text(_busy ? i18n.t('loading') : i18n.t('complete_ride')),
+      );
+    }
+
+    return FilledButton.tonal(
+      onPressed: _busy ? null : () => _refreshOrders(),
+      child: Text(_busy ? i18n.t('loading') : i18n.t('refresh_status')),
     );
   }
 }
