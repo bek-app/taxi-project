@@ -1,0 +1,17 @@
+# Node / NestJS
+backend/node_modules/
+backend/dist/
+backend/.env
+
+# Flutter
+**/.dart_tool/
+**/.packages
+**/build/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.metadata
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/

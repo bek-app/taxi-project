@@ -1,0 +1,48 @@
+### Swagger UI
+GET http://localhost:3000/api/docs
+
+### Health
+GET http://localhost:3000/api/health
+
+### Driver online
+PATCH http://localhost:3000/api/drivers/3fbf77cb-0b80-4b1e-84a4-c56b9d0f4da0/availability
+Content-Type: application/json
+
+{
+  "online": true
+}
+
+### Driver location
+PATCH http://localhost:3000/api/drivers/3fbf77cb-0b80-4b1e-84a4-c56b9d0f4da0/location
+Content-Type: application/json
+
+{
+  "latitude": 43.238949,
+  "longitude": 76.889709
+}
+
+### Create order
+POST http://localhost:3000/api/orders
+Content-Type: application/json
+
+{
+  "passengerId": "f3a51fc6-fd09-4c32-8c6f-46fd019e3472",
+  "cityId": "almaty",
+  "pickupLatitude": 43.238949,
+  "pickupLongitude": 76.889709,
+  "dropoffLatitude": 43.240978,
+  "dropoffLongitude": 76.924758,
+  "distanceKm": 8.5,
+  "durationMinutes": 18
+}
+
+### Search driver
+POST http://localhost:3000/api/orders/{{order_id}}/search-driver
+
+### Update status
+PATCH http://localhost:3000/api/orders/{{order_id}}/status
+Content-Type: application/json
+
+{
+  "status": "IN_PROGRESS"
+}
