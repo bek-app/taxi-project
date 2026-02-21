@@ -8,6 +8,7 @@ import { HealthModule } from './health/health.module';
 import { MatchmakingModule } from './matchmaking/matchmaking.module';
 import { OrdersModule } from './orders/orders.module';
 import { PricingModule } from './pricing/pricing.module';
+import { RoutingModule } from './routing/routing.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { PricingModule } from './pricing/pricing.module';
     AuthModule,
     GeoModule,
     PricingModule,
+    RoutingModule,
     MatchmakingModule,
     OrdersModule,
     DriversModule,

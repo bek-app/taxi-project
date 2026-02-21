@@ -30,6 +30,7 @@ Public endpoints:
 ## Core endpoints
 
 - `GET /api/auth/me`
+- `GET /api/routing/route?coordinates=lng,lat;lng,lat`
 - `POST /api/orders`
 - `POST /api/orders/:orderId/search-driver`
 - `PATCH /api/orders/:orderId/status`
@@ -37,3 +38,11 @@ Public endpoints:
 - `PATCH /api/drivers/me/availability`
 
 `/api/orders/*` және `/api/drivers/*` endpoint-тері Bearer token талап етеді.
+
+## Routing provider
+
+Road-based distance/ETA OSRM арқылы есептеледі:
+
+- `ROUTING_PROVIDER_URL` (default: `https://router.project-osrm.org`)
+- `ROUTING_TIMEOUT_MS` (default: `8000`)
+- `ROUTING_CACHE_TTL_SEC` (default: `120`)

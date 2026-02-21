@@ -19,7 +19,7 @@ async function bootstrap(): Promise<void> {
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Taxi MVP API')
-    .setDescription('Taxi MVP backend (orders, drivers, matchmaking, pricing)')
+    .setDescription('Taxi MVP backend (auth, routing, orders, drivers, matchmaking, pricing)')
     .setVersion('1.0.0')
     .addBearerAuth(
       {

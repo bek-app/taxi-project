@@ -12,6 +12,7 @@ import '../i18n/app_i18n.dart';
 import '../models/app_role.dart';
 import '../models/auth_session.dart';
 import '../models/backend_order.dart';
+import '../models/route_snapshot.dart';
 import '../models/tariff.dart';
 import '../widgets/map_backdrop.dart';
 
@@ -59,12 +60,21 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
   StreamSubscription<Position>? _positionSubscription;
 
   // Search / geocoding
+  final TextEditingController _pickupController = TextEditingController();
+  LatLng? _pickupOverrideLatLng;
+
   final TextEditingController _searchController = TextEditingController();
   Timer? _debounce;
   List<_GeoSuggestion> _suggestions = [];
   bool _isSearching = false;
   LatLng? _destinationLatLng;
   String? _destinationName;
+  _ActiveSearch _activeSearch = _ActiveSearch.none;
+  Timer? _routeDebounce;
+  RouteSnapshot? _routeSnapshot;
+  bool _isRouteLoading = false;
+  bool _isRouteFallback = false;
+  String? _routeKey;
 
   LatLng? get _currentLatLng {
     final p = _currentPosition;
@@ -73,6 +83,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
   }
 
   LatLng get _pickupPoint {
+    if (_pickupOverrideLatLng != null) return _pickupOverrideLatLng!;
     final order = _activeOrder;
     if (order?.pickupLatitude != null && order?.pickupLongitude != null) {
       return LatLng(order!.pickupLatitude!, order.pickupLongitude!);
@@ -99,7 +110,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     return LatLng(pickup.latitude + 0.0035, pickup.longitude + 0.0045);
   }
 
-  double get _distanceKm {
+  double get _fallbackDistanceKm {
     final pickup = _pickupPoint;
     final dropoff = _dropoffPoint;
     final meters = Geolocator.distanceBetween(
@@ -112,7 +123,12 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     return km < 1.5 ? 1.5 : km;
   }
 
-  double get _durationMin => (_distanceKm * 2.8).roundToDouble();
+  double get _distanceKm => _routeSnapshot?.distanceKm ?? _fallbackDistanceKm;
+
+  double get _durationMin =>
+      _routeSnapshot?.durationMinutes ??
+      (_fallbackDistanceKm * 2.8).roundToDouble();
+
   double get _baseFormulaPrice =>
       _baseFare + (_distanceKm * _perKm) + (_durationMin * _perMinute);
   double get _finalPrice =>
@@ -120,17 +136,31 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
   double get _displayPrice => _activeOrder?.finalPrice ?? _finalPrice;
   AppI18n get _i18n => AppI18n(widget.lang);
 
+  List<LatLng>? get _routePolylinePoints {
+    final points = _routeSnapshot?.geometry;
+    if (points == null || points.length < 2) {
+      return null;
+    }
+    return points;
+  }
+
+  bool get _needsRouteEstimate =>
+      _destinationLatLng != null || _activeOrder != null;
+
   @override
   void initState() {
     super.initState();
     _refreshCurrentLocation();
+    _scheduleRouteRefresh(delay: Duration.zero);
   }
 
   @override
   void dispose() {
     _positionSubscription?.cancel();
+    _pickupController.dispose();
     _searchController.dispose();
     _debounce?.cancel();
+    _routeDebounce?.cancel();
     super.dispose();
   }
 
@@ -188,6 +218,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
             _locationError = null;
             _isLocating = false;
           });
+          _scheduleRouteRefresh();
         },
         onError: (_) {
           if (!mounted) return;
@@ -208,8 +239,20 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
 
   // ── Geocoding (Nominatim) ─────────────────────────────────────────────────
 
-  void _onSearchChanged(String value) {
+  void _onPickupChanged(String value) {
     _debounce?.cancel();
+    setState(() => _activeSearch = _ActiveSearch.pickup);
+    if (value.trim().length < 3) {
+      setState(() => _suggestions = []);
+      return;
+    }
+    _debounce = Timer(const Duration(milliseconds: 600),
+        () => _fetchNominatimSuggestions(value.trim()));
+  }
+
+  void _onDropoffChanged(String value) {
+    _debounce?.cancel();
+    setState(() => _activeSearch = _ActiveSearch.dropoff);
     if (value.trim().length < 3) {
       setState(() => _suggestions = []);
       return;
@@ -227,8 +270,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
         'format': 'json',
         'limit': '5',
         'countrycodes': 'kz',
-        'accept-language':
-            widget.lang == AppLang.kz ? 'kk,ru,en' : 'ru,kk,en',
+        'accept-language': widget.lang == AppLang.kz ? 'kk,ru,en' : 'ru,kk,en',
       });
       final response = await http.get(
         uri,
@@ -255,15 +297,35 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     }
   }
 
-  void _selectDestination(_GeoSuggestion suggestion) {
+  void _onSuggestionTapped(_GeoSuggestion suggestion) {
     final name = suggestion.displayName.split(',').first.trim();
+    if (_activeSearch == _ActiveSearch.pickup) {
+      setState(() {
+        _pickupOverrideLatLng = suggestion.latLng;
+        _pickupController.text = name;
+        _suggestions = [];
+        _activeSearch = _ActiveSearch.none;
+      });
+    } else {
+      setState(() {
+        _destinationLatLng = suggestion.latLng;
+        _destinationName = name;
+        _searchController.text = name;
+        _suggestions = [];
+        _activeSearch = _ActiveSearch.none;
+      });
+    }
+    FocusManager.instance.primaryFocus?.unfocus();
+    _scheduleRouteRefresh();
+  }
+
+  void _clearPickupOverride() {
     setState(() {
-      _destinationLatLng = suggestion.latLng;
-      _destinationName = name;
-      _searchController.text = name;
+      _pickupOverrideLatLng = null;
+      _pickupController.clear();
       _suggestions = [];
     });
-    FocusManager.instance.primaryFocus?.unfocus();
+    _scheduleRouteRefresh();
   }
 
   void _clearDestination() {
@@ -273,6 +335,124 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
       _searchController.clear();
       _suggestions = [];
     });
+    _scheduleRouteRefresh();
+  }
+
+  // ── Routing estimate (backend) ─────────────────────────────────────────────
+
+  void _scheduleRouteRefresh(
+      {Duration delay = const Duration(milliseconds: 450)}) {
+    _routeDebounce?.cancel();
+    _routeDebounce = Timer(delay, _refreshRouteEstimate);
+  }
+
+  String _buildRouteKey(LatLng pickup, LatLng dropoff) {
+    return '${pickup.latitude.toStringAsFixed(5)},${pickup.longitude.toStringAsFixed(5)}'
+        '|${dropoff.latitude.toStringAsFixed(5)},${dropoff.longitude.toStringAsFixed(5)}';
+  }
+
+  String _toRouteCoordinate(LatLng point) {
+    return '${point.longitude.toStringAsFixed(6)},${point.latitude.toStringAsFixed(6)}';
+  }
+
+  Future<void> _refreshRouteEstimate() async {
+    if (!_needsRouteEstimate) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _routeSnapshot = null;
+        _isRouteLoading = false;
+        _isRouteFallback = false;
+        _routeKey = null;
+      });
+      return;
+    }
+
+    final pickup = _pickupPoint;
+    final dropoff = _dropoffPoint;
+    final key = _buildRouteKey(pickup, dropoff);
+
+    if (_routeKey == key &&
+        (_routeSnapshot != null || _isRouteFallback || _isRouteLoading)) {
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _routeKey = key;
+        _isRouteLoading = true;
+        _isRouteFallback = false;
+      });
+    }
+
+    try {
+      final route = await widget.apiClient.getRoute(
+        coordinates: <String>[
+          _toRouteCoordinate(pickup),
+          _toRouteCoordinate(dropoff),
+        ],
+      );
+
+      if (!mounted || _routeKey != key) {
+        return;
+      }
+
+      if (route.distanceKm <= 0 ||
+          route.durationMinutes <= 0 ||
+          route.geometry.length < 2) {
+        setState(() {
+          _routeSnapshot = null;
+          _isRouteLoading = false;
+          _isRouteFallback = true;
+        });
+        return;
+      }
+
+      setState(() {
+        _routeSnapshot = route;
+        _isRouteLoading = false;
+        _isRouteFallback = false;
+      });
+    } catch (_) {
+      if (!mounted || _routeKey != key) {
+        return;
+      }
+      setState(() {
+        _routeSnapshot = null;
+        _isRouteLoading = false;
+        _isRouteFallback = true;
+      });
+    }
+  }
+
+  String _routeInfoText() {
+    if (_isRouteLoading) {
+      return _i18n.t('route_calculating');
+    }
+    if (_routeSnapshot != null) {
+      return _i18n.t('route_ready', {
+        'km': _distanceKm.toStringAsFixed(1),
+        'min': _durationMin.toStringAsFixed(0),
+      });
+    }
+    if (_isRouteFallback) {
+      return _i18n.t('route_fallback');
+    }
+    return _i18n.t('route_calculating');
+  }
+
+  Color _routeInfoColor() {
+    if (_isRouteLoading) {
+      return UiKitColors.primary;
+    }
+    if (_routeSnapshot != null) {
+      return UiKitColors.success;
+    }
+    if (_isRouteFallback) {
+      return UiKitColors.textSecondary;
+    }
+    return UiKitColors.textSecondary;
   }
 
   // ── Order flow ────────────────────────────────────────────────────────────
@@ -288,11 +468,13 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     if (_currentPosition == null) {
       await _refreshCurrentLocation();
       if (_currentPosition == null) {
-        setState(
-            () => _errorMessage = _locationError ?? _i18n.t('location_unknown'));
+        setState(() =>
+            _errorMessage = _locationError ?? _i18n.t('location_unknown'));
         return;
       }
     }
+
+    await _refreshRouteEstimate();
 
     final pickup = _pickupPoint;
     final dropoff = _dropoffPoint;
@@ -317,6 +499,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
       );
       if (!mounted) return;
       setState(() => _activeOrder = order);
+      _scheduleRouteRefresh(delay: Duration.zero);
       await _searchDriverForCurrentOrder(showLoader: false);
     } catch (error) {
       if (!mounted) return;
@@ -341,6 +524,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
       final assigned = await widget.apiClient.searchDriver(order.id);
       if (!mounted) return;
       setState(() => _activeOrder = assigned);
+      _scheduleRouteRefresh(delay: Duration.zero);
 
       if (assigned.driverId == null || assigned.status != 'DRIVER_ASSIGNED') {
         setState(() => _errorMessage = _i18n.t('driver_not_found'));
@@ -355,6 +539,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
         _step = ClientFlowStep.tracking;
         _errorMessage = null;
       });
+      _scheduleRouteRefresh(delay: Duration.zero);
     } catch (error) {
       if (!mounted) return;
       setState(() => _errorMessage = error.toString());
@@ -374,8 +559,8 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     try {
       BackendOrder current = order;
       if (current.status != 'IN_PROGRESS') {
-        current = await widget.apiClient
-            .updateOrderStatus(current.id, 'IN_PROGRESS');
+        current =
+            await widget.apiClient.updateOrderStatus(current.id, 'IN_PROGRESS');
       }
       if (current.status != 'COMPLETED') {
         current =
@@ -386,6 +571,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
         _activeOrder = current;
         _step = ClientFlowStep.completed;
       });
+      _scheduleRouteRefresh(delay: Duration.zero);
     } catch (error) {
       if (!mounted) return;
       setState(() => _errorMessage = error.toString());
@@ -407,7 +593,10 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
       _errorMessage = null;
       _isSubmitting = false;
       _step = ClientFlowStep.home;
+      _pickupOverrideLatLng = null;
+      _pickupController.clear();
     });
+    _scheduleRouteRefresh(delay: Duration.zero);
   }
 
   // ── Screens ───────────────────────────────────────────────────────────────
@@ -431,101 +620,222 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
   Widget _buildHomeScreen(BuildContext context) {
     final i18n = _i18n;
     final hasDest = _destinationLatLng != null;
+    final gpsOk = _currentLatLng != null && _locationError == null;
 
     return Scaffold(
       body: Stack(
         children: [
+          // ── Full-screen map ──────────────────────────────────────────
           Positioned.fill(
             child: MapBackdrop(
               currentLocation: _currentLatLng,
               pickupPoint: _currentLatLng ?? _fallbackPickup,
               dropoffPoint: hasDest ? _destinationLatLng : null,
+              routePolylinePoints: hasDest ? _routePolylinePoints : null,
             ),
           ),
 
-          // ── Search bar + suggestions ──────────────────────────────────
+          // ── A/B search card + suggestions ────────────────────────────
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 84, 16, 0),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  // Search card
                   DecoratedBox(
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(16),
                       boxShadow: const [
                         BoxShadow(
-                          color: Color(0x12000000),
-                          blurRadius: 24,
-                          offset: Offset(0, 8),
+                          color: Color(0x14000000),
+                          blurRadius: 20,
+                          offset: Offset(0, 6),
                         ),
                       ],
                     ),
-                    child: TextField(
-                      controller: _searchController,
-                      onChanged: _onSearchChanged,
-                      decoration: InputDecoration(
-                        hintText: i18n.t('search_destination'),
-                        prefixIcon: const Icon(Icons.search),
-                        suffixIcon: _isSearching
-                            ? const Padding(
-                                padding: EdgeInsets.all(12),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // A: Pickup row
+                        Row(
+                          children: [
+                            const SizedBox(width: 14),
+                            const Icon(Icons.radio_button_checked,
+                                color: UiKitColors.primary, size: 20),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: TextField(
+                                controller: _pickupController,
+                                onChanged: _onPickupChanged,
+                                onTap: () => setState(() =>
+                                    _activeSearch = _ActiveSearch.pickup),
+                                decoration: InputDecoration(
+                                  hintText: i18n.t('your_location'),
+                                  hintStyle: const TextStyle(
+                                      color: UiKitColors.textSecondary),
+                                  border: InputBorder.none,
+                                  enabledBorder: InputBorder.none,
+                                  focusedBorder: InputBorder.none,
+                                  contentPadding: const EdgeInsets.symmetric(
+                                      vertical: 15),
+                                ),
+                              ),
+                            ),
+                            if (_pickupOverrideLatLng != null)
+                              IconButton(
+                                icon: const Icon(Icons.clear, size: 18),
+                                onPressed: _clearPickupOverride,
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(
+                                    minWidth: 36, minHeight: 36),
+                              )
+                            else
+                              Padding(
+                                padding: const EdgeInsets.only(right: 12),
+                                child: Icon(Icons.my_location,
+                                    size: 18,
+                                    color: gpsOk
+                                        ? UiKitColors.success
+                                        : UiKitColors.textSecondary),
+                              ),
+                          ],
+                        ),
+                        // Vertical connector
+                        Padding(
+                          padding: const EdgeInsets.only(left: 23),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 2,
+                                height: 10,
+                                color: const Color(0xFFE5E7EB),
+                              ),
+                              const Expanded(
+                                  child: Divider(height: 1, indent: 8)),
+                            ],
+                          ),
+                        ),
+                        // B: Dropoff row
+                        Row(
+                          children: [
+                            const SizedBox(width: 14),
+                            const Icon(Icons.location_on,
+                                color: Color(0xFF10B981), size: 20),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: TextField(
+                                controller: _searchController,
+                                onChanged: _onDropoffChanged,
+                                onTap: () => setState(() =>
+                                    _activeSearch = _ActiveSearch.dropoff),
+                                decoration: InputDecoration(
+                                  hintText: i18n.t('where_to'),
+                                  hintStyle: const TextStyle(
+                                      color: UiKitColors.textSecondary),
+                                  border: InputBorder.none,
+                                  enabledBorder: InputBorder.none,
+                                  focusedBorder: InputBorder.none,
+                                  contentPadding: const EdgeInsets.symmetric(
+                                      vertical: 15),
+                                ),
+                              ),
+                            ),
+                            if (_isSearching)
+                              const Padding(
+                                padding: EdgeInsets.only(right: 12),
                                 child: SizedBox(
-                                  width: 20,
-                                  height: 20,
+                                  width: 18,
+                                  height: 18,
                                   child: CircularProgressIndicator(
                                       strokeWidth: 2,
                                       color: UiKitColors.primary),
                                 ),
                               )
-                            : (hasDest
-                                ? IconButton(
-                                    icon: const Icon(Icons.clear),
-                                    onPressed: _clearDestination,
-                                  )
-                                : null),
-                        border: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 16,
+                            else if (hasDest)
+                              IconButton(
+                                icon: const Icon(Icons.clear, size: 18),
+                                onPressed: _clearDestination,
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(
+                                    minWidth: 36, minHeight: 36),
+                              ),
+                          ],
                         ),
-                      ),
+                      ],
                     ),
                   ),
+                  // Suggestions dropdown
                   if (_suggestions.isNotEmpty)
-                    Card(
+                    Container(
                       margin: const EdgeInsets.only(top: 4),
-                      child: ListView.separated(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: _suggestions.length,
-                        separatorBuilder: (_, __) =>
-                            const Divider(height: 1, indent: 16),
-                        itemBuilder: (context, index) {
-                          final s = _suggestions[index];
-                          final title = s.displayName.split(',').first.trim();
-                          final subtitle = s.displayName
-                              .split(',')
-                              .skip(1)
-                              .take(2)
-                              .join(',')
-                              .trim();
-                          return ListTile(
-                            dense: true,
-                            leading: const Icon(Icons.location_on_outlined,
-                                color: UiKitColors.primary),
-                            title: Text(title),
-                            subtitle: subtitle.isNotEmpty
-                                ? Text(
-                                    subtitle,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  )
-                                : null,
-                            onTap: () => _selectDestination(s),
-                          );
-                        },
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Color(0x10000000),
+                            blurRadius: 16,
+                            offset: Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
+                        child: ListView.separated(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: _suggestions.length,
+                          separatorBuilder: (_, __) =>
+                              const Divider(height: 1, indent: 56),
+                          itemBuilder: (context, index) {
+                            final s = _suggestions[index];
+                            final title =
+                                s.displayName.split(',').first.trim();
+                            final subtitle = s.displayName
+                                .split(',')
+                                .skip(1)
+                                .take(2)
+                                .join(',')
+                                .trim();
+                            final isPickup =
+                                _activeSearch == _ActiveSearch.pickup;
+                            return ListTile(
+                              dense: true,
+                              leading: Container(
+                                width: 32,
+                                height: 32,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: isPickup
+                                      ? const Color(0xFFEDE9FE)
+                                      : const Color(0xFFD1FAE5),
+                                ),
+                                child: Icon(
+                                  isPickup
+                                      ? Icons.radio_button_checked
+                                      : Icons.location_on_outlined,
+                                  size: 16,
+                                  color: isPickup
+                                      ? UiKitColors.primary
+                                      : UiKitColors.success,
+                                ),
+                              ),
+                              title: Text(title,
+                                  style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500)),
+                              subtitle: subtitle.isNotEmpty
+                                  ? Text(subtitle,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(fontSize: 12))
+                                  : null,
+                              onTap: () => _onSuggestionTapped(s),
+                            );
+                          },
+                        ),
                       ),
                     ),
                 ],
@@ -533,55 +843,46 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
             ),
           ),
 
-          // ── Bottom card ───────────────────────────────────────────────
+          // ── Bottom action card ────────────────────────────────────────
           Align(
             alignment: Alignment.bottomCenter,
             child: SafeArea(
               top: false,
               child: Container(
-                margin: const EdgeInsets.all(16),
-                padding: const EdgeInsets.all(16),
+                margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  borderRadius: BorderRadius.circular(20),
+                  borderRadius: BorderRadius.circular(24),
                   boxShadow: const [
                     BoxShadow(
-                      color: Color(0x1A000000),
-                      blurRadius: 26,
-                      offset: Offset(0, 10),
+                      color: Color(0x1C000000),
+                      blurRadius: 32,
+                      offset: Offset(0, 12),
                     ),
                   ],
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text(
-                      i18n.t('where_to'),
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      i18n.t('signed_as', {'email': widget.session.email}),
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: UiKitColors.textSecondary,
-                          ),
-                    ),
-                    const SizedBox(height: 6),
+                    // GPS status row
                     Row(
                       children: [
-                        Icon(
-                          _isLocating
-                              ? Icons.sync
-                              : (_locationError == null
-                                  ? Icons.my_location
-                                  : Icons.location_off),
-                          size: 14,
-                          color: _locationError == null
-                              ? UiKitColors.success
-                              : UiKitColors.danger,
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 300),
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: _isLocating
+                                ? UiKitColors.primary
+                                : (_locationError == null
+                                    ? UiKitColors.success
+                                    : UiKitColors.danger),
+                          ),
                         ),
-                        const SizedBox(width: 6),
+                        const SizedBox(width: 7),
                         Expanded(
                           child: Text(
                             _isLocating
@@ -589,58 +890,144 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                                 : (_locationError == null
                                     ? i18n.t('location_ready')
                                     : _locationError!),
-                            style:
-                                Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      color: _locationError == null
-                                          ? UiKitColors.success
-                                          : UiKitColors.danger,
-                                      fontWeight: FontWeight.w600,
-                                    ),
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                  color: _locationError == null
+                                      ? UiKitColors.textSecondary
+                                      : UiKitColors.danger,
+                                ),
                           ),
                         ),
-                        TextButton.icon(
-                          onPressed:
+                        GestureDetector(
+                          onTap:
                               _isLocating ? null : _refreshCurrentLocation,
-                          icon: const Icon(Icons.refresh, size: 16),
-                          label: const Text('GPS'),
-                          style: TextButton.styleFrom(
-                            visualDensity: VisualDensity.compact,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF3F4F6),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Text(
+                              'GPS',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: UiKitColors.primary,
+                              ),
+                            ),
                           ),
                         ),
                       ],
                     ),
                     if (hasDest) ...[
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 16),
+                      const Divider(height: 1, color: Color(0xFFF3F4F6)),
+                      const SizedBox(height: 14),
+                      // Destination row
                       Row(
                         children: [
-                          const Icon(Icons.flag_rounded,
-                              color: UiKitColors.success, size: 16),
-                          const SizedBox(width: 6),
+                          const Icon(Icons.location_on_rounded,
+                              color: Color(0xFF10B981), size: 18),
+                          const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              _destinationName!,
+                              _destinationName ?? '',
                               style: Theme.of(context)
                                   .textTheme
                                   .bodyMedium
                                   ?.copyWith(fontWeight: FontWeight.w600),
+                              maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
                           Text(
-                            '${_distanceKm.toStringAsFixed(1)} km',
-                            style:
-                                Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      color: UiKitColors.textSecondary,
-                                    ),
+                            '${_distanceKm.toStringAsFixed(1)} км  •  ~${_durationMin.toStringAsFixed(0)} мин',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(color: UiKitColors.textSecondary),
                           ),
                         ],
                       ),
-                    ],
-                    const SizedBox(height: 14),
+                      if (_isRouteLoading || _isRouteFallback) ...[
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            Icon(
+                              _isRouteLoading
+                                  ? Icons.sync
+                                  : Icons.info_outline,
+                              size: 13,
+                              color: _routeInfoColor(),
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              _routeInfoText(),
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(color: _routeInfoColor()),
+                            ),
+                          ],
+                        ),
+                      ],
+                      // Price
+                      const SizedBox(height: 14),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.baseline,
+                        textBaseline: TextBaseline.alphabetic,
+                        children: [
+                          Text(
+                            _finalPrice.toStringAsFixed(0),
+                            style: Theme.of(context)
+                                .textTheme
+                                .headlineLarge
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                  color: UiKitColors.primary,
+                                  height: 1,
+                                ),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '₸',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  color: UiKitColors.primary,
+                                ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                    ] else
+                      const SizedBox(height: 16),
+                    // CTA button
                     FilledButton(
-                      onPressed: () =>
-                          setState(() => _step = ClientFlowStep.confirmRide),
-                      child: Text(i18n.t('set_destination')),
+                      onPressed: hasDest
+                          ? () => setState(
+                              () => _step = ClientFlowStep.confirmRide)
+                          : null,
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size.fromHeight(56),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16)),
+                        disabledBackgroundColor: const Color(0xFFF3F4F6),
+                        disabledForegroundColor: UiKitColors.textSecondary,
+                      ),
+                      child: Text(
+                        hasDest
+                            ? i18n.t('confirm_ride')
+                            : i18n.t('where_to'),
+                        style: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w700),
+                      ),
                     ),
                   ],
                 ),
@@ -671,6 +1058,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                 currentLocation: _currentLatLng,
                 pickupPoint: _pickupPoint,
                 dropoffPoint: _dropoffPoint,
+                routePolylinePoints: _routePolylinePoints,
               ),
             ),
           ),
@@ -709,7 +1097,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                           i18n.t('tariff_multiplier',
                               {'value': tariff.multiplier.toStringAsFixed(2)}),
                         ),
-                        trailing: Text('${price.toStringAsFixed(0)} KZT'),
+                        trailing: Text('${price.toStringAsFixed(0)} ₸'),
                         onTap: () => setState(() => _selectedTariff = index),
                       ),
                     );
@@ -721,13 +1109,41 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                           color: UiKitColors.textSecondary,
                         ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    i18n.t('final_price',
-                        {'price': _finalPrice.toStringAsFixed(0)}),
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
+                    children: [
+                      Text(
+                        _finalPrice.toStringAsFixed(0),
+                        style: Theme.of(context)
+                            .textTheme
+                            .headlineMedium
+                            ?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              color: UiKitColors.primary,
+                            ),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        '₸',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: UiKitColors.primary,
+                            ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Center(
+                    child: Text(
+                      _routeInfoText(),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: _routeInfoColor(),
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
                   ),
                 ],
               ),
@@ -736,8 +1152,15 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
           const SizedBox(height: 16),
           FilledButton(
             onPressed: _isSubmitting ? null : _confirmRideAndRequestDriver,
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(56),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16)),
+            ),
             child: Text(
               _isSubmitting ? i18n.t('please_wait') : i18n.t('confirm_ride'),
+              style:
+                  const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
             ),
           ),
         ],
@@ -757,6 +1180,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
               pickupPoint: _pickupPoint,
               dropoffPoint: _dropoffPoint,
               driverPoint: _driverPoint,
+              routePolylinePoints: _routePolylinePoints,
             ),
           ),
           Center(
@@ -845,6 +1269,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
               pickupPoint: _pickupPoint,
               dropoffPoint: _dropoffPoint,
               driverPoint: _driverPoint,
+              routePolylinePoints: _routePolylinePoints,
             ),
           ),
           SafeArea(
@@ -939,6 +1364,11 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                         Expanded(
                           child: FilledButton(
                             onPressed: _isSubmitting ? null : _completeTrip,
+                            style: FilledButton.styleFrom(
+                              minimumSize: const Size.fromHeight(56),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16)),
+                            ),
                             child: Text(
                               _isSubmitting
                                   ? i18n.t('updating')
@@ -1015,7 +1445,13 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                   _errorMessage = null;
                   _step = ClientFlowStep.home;
                 });
+                _scheduleRouteRefresh(delay: Duration.zero);
               },
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(56),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16)),
+              ),
               child: Text(i18n.t('book_again')),
             ),
           ],
@@ -1032,3 +1468,5 @@ class _GeoSuggestion {
   final String displayName;
   final LatLng latLng;
 }
+
+enum _ActiveSearch { none, pickup, dropoff }

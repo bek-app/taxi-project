@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import '../models/app_role.dart';
 import '../models/auth_session.dart';
 import '../models/backend_order.dart';
+import '../models/route_snapshot.dart';
 
 class TaxiApiClient {
   TaxiApiClient({http.Client? client}) : _client = client ?? http.Client();
@@ -119,6 +120,18 @@ class TaxiApiClient {
       },
     );
     return BackendOrder.fromJson(_decodeAsMap(response));
+  }
+
+  Future<RouteSnapshot> getRoute({
+    required List<String> coordinates,
+  }) async {
+    if (coordinates.length < 2) {
+      throw Exception('At least 2 coordinates are required');
+    }
+
+    final encoded = Uri.encodeQueryComponent(coordinates.join(';'));
+    final response = await _get('/routing/route?coordinates=$encoded');
+    return RouteSnapshot.fromJson(_decodeAsMap(response));
   }
 
   Future<BackendOrder> searchDriver(String orderId) async {

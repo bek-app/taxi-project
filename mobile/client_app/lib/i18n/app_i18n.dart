@@ -48,6 +48,8 @@ class AppI18n {
       'location_service_disabled':
           'Геолокация сервисі өшірілген. Қосып қайта көріңіз.',
       'location_unknown': 'Орныңыз анықталмады',
+      'search_pickup': 'Шығу нүктесін іздеу',
+      'your_location': 'Сіздің орыныңыз',
       'search_destination': 'Мекенжай іздеу',
       'where_to': 'Қайда барасыз?',
       'signed_as': '{email} аккаунтымен кірді',
@@ -102,6 +104,10 @@ class AppI18n {
       'status_CANCELED': 'Бас тартылды',
       'invalid_login_response': 'Login жауабы қате.',
       'invalid_register_response': 'Register жауабы қате.',
+      'route_calculating': 'Маршрут жолмен есептеліп жатыр...',
+      'route_ready': 'Маршрут: {km} км • {min} мин',
+      'route_fallback':
+          'Маршрут сервисі уақытша қолжетімсіз, тікелей қашықтық қолданылды.',
       'unknown_error': 'Белгісіз қате',
     },
     AppLang.ru: {
@@ -135,6 +141,8 @@ class AppI18n {
       'location_service_disabled':
           'Сервис геолокации отключен. Включите и повторите.',
       'location_unknown': 'Не удалось определить местоположение',
+      'search_pickup': 'Откуда едем?',
+      'your_location': 'Ваше местоположение',
       'search_destination': 'Введите адрес',
       'where_to': 'Куда поедем?',
       'signed_as': 'Вход выполнен: {email}',
@@ -189,6 +197,10 @@ class AppI18n {
       'status_CANCELED': 'Отменено',
       'invalid_login_response': 'Некорректный ответ login.',
       'invalid_register_response': 'Некорректный ответ register.',
+      'route_calculating': 'Считаем маршрут по дороге...',
+      'route_ready': 'Маршрут: {km} км • {min} мин',
+      'route_fallback':
+          'Сервис маршрута временно недоступен, используется прямая дистанция.',
       'unknown_error': 'Неизвестная ошибка',
     },
   };

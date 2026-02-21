@@ -7,6 +7,10 @@ GET {{baseUrl}}/docs
 ### Health
 GET {{baseUrl}}/health
 
+### Routing (road-based distance + ETA)
+# @name route
+GET {{baseUrl}}/routing/route?coordinates=76.889709,43.238949;76.924758,43.240978
+
 ### Register client
 POST {{baseUrl}}/auth/register
 Content-Type: application/json
@@ -74,8 +78,8 @@ Authorization: Bearer {{token}}
   "pickupLongitude": 76.889709,
   "dropoffLatitude": 43.240978,
   "dropoffLongitude": 76.924758,
-  "distanceKm": 8.5,
-  "durationMinutes": 18
+  "distanceKm": {{route.response.body.distanceKm}},
+  "durationMinutes": {{route.response.body.durationMinutes}}
 }
 
 ### Search driver

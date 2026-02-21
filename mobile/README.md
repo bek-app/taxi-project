@@ -27,6 +27,13 @@ Single app алдымен login экранын ашады (`Taxi Super App`).
 Login бетінде және қолданба ішінде жоғарғы панельде `KZ/RU` тіл ауыстырғыш бар.
 Алдымен `register` арқылы тіркелу керек (email, password, role).
 
+## Routing/Map
+
+`client_app` маршрутты backend-тен алады:
+
+- `GET /api/routing/route?coordinates=lng,lat;lng,lat`
+- Distance/ETA осы endpoint арқылы есептеледі, карта сол `polyline`-ды сызады.
+
 ## Role switch
 
 `client_app` ішінде экранның жоғарғы оң жағындағы switch арқылы рөлді ауыстыруға болады:

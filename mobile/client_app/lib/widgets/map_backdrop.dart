@@ -1,9 +1,5 @@
-import 'dart:async';
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
 import '../core/colors.dart';
@@ -14,6 +10,7 @@ class MapBackdrop extends StatefulWidget {
     this.pickupPoint,
     this.dropoffPoint,
     this.driverPoint,
+    this.routePolylinePoints,
     super.key,
   });
 
@@ -23,6 +20,7 @@ class MapBackdrop extends StatefulWidget {
   final LatLng? pickupPoint;
   final LatLng? dropoffPoint;
   final LatLng? driverPoint;
+  final List<LatLng>? routePolylinePoints;
 
   @override
   State<MapBackdrop> createState() => _MapBackdropState();
@@ -30,16 +28,6 @@ class MapBackdrop extends StatefulWidget {
 
 class _MapBackdropState extends State<MapBackdrop> {
   final _mapController = MapController();
-  static final Map<String, List<LatLng>> _routeCache = <String, List<LatLng>>{};
-  static const Duration _requestTimeout = Duration(seconds: 8);
-
-  List<LatLng>? _roadPolylinePoints;
-
-  @override
-  void initState() {
-    super.initState();
-    _refreshRoute();
-  }
 
   @override
   void didUpdateWidget(MapBackdrop oldWidget) {
@@ -54,12 +42,6 @@ class _MapBackdropState extends State<MapBackdrop> {
         }
       });
     }
-
-    final oldKey = _routeKey(_buildRouteWaypoints(oldWidget));
-    final newKey = _routeKey(_buildRouteWaypoints(widget));
-    if (oldKey != newKey) {
-      _refreshRoute();
-    }
   }
 
   @override
@@ -68,133 +50,20 @@ class _MapBackdropState extends State<MapBackdrop> {
     super.dispose();
   }
 
-  Future<void> _refreshRoute() async {
-    final waypoints = _buildRouteWaypoints(widget);
-    if (waypoints.length < 2) {
-      if (mounted) {
-        setState(() {
-          _roadPolylinePoints = null;
-        });
-      }
-      return;
+  List<LatLng> _fallbackPolylinePoints() {
+    if (widget.driverPoint != null &&
+        widget.pickupPoint != null &&
+        widget.dropoffPoint != null) {
+      return <LatLng>[
+        widget.driverPoint!,
+        widget.pickupPoint!,
+        widget.dropoffPoint!
+      ];
     }
-
-    final cacheKey = _routeKey(waypoints);
-    final cached = _routeCache[cacheKey];
-    if (cached != null) {
-      if (mounted) {
-        setState(() {
-          _roadPolylinePoints = cached;
-        });
-      }
-      return;
-    }
-
-    try {
-      final route = await _fetchRoadRoute(waypoints);
-      if (!mounted) {
-        return;
-      }
-      _routeCache[cacheKey] = route;
-      setState(() {
-        _roadPolylinePoints = route;
-      });
-    } catch (_) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _roadPolylinePoints = waypoints;
-      });
-    }
-  }
-
-  List<LatLng> _buildRouteWaypoints(MapBackdrop data) {
-    if (data.driverPoint != null &&
-        data.pickupPoint != null &&
-        data.dropoffPoint != null) {
-      return <LatLng>[data.driverPoint!, data.pickupPoint!, data.dropoffPoint!];
-    }
-    if (data.pickupPoint != null && data.dropoffPoint != null) {
-      return <LatLng>[data.pickupPoint!, data.dropoffPoint!];
+    if (widget.pickupPoint != null && widget.dropoffPoint != null) {
+      return <LatLng>[widget.pickupPoint!, widget.dropoffPoint!];
     }
     return const <LatLng>[];
-  }
-
-  String _routeKey(List<LatLng> points) {
-    return points
-        .map(
-          (point) =>
-              '${point.latitude.toStringAsFixed(5)},${point.longitude.toStringAsFixed(5)}',
-        )
-        .join('|');
-  }
-
-  Future<List<LatLng>> _fetchRoadRoute(List<LatLng> points) async {
-    final coordinates = points
-        .map(
-          (point) =>
-              '${point.longitude.toStringAsFixed(6)},${point.latitude.toStringAsFixed(6)}',
-        )
-        .join(';');
-
-    final uri = Uri.https(
-      'router.project-osrm.org',
-      '/route/v1/driving/$coordinates',
-      const <String, String>{
-        'alternatives': 'false',
-        'overview': 'full',
-        'geometries': 'geojson',
-        'steps': 'false',
-      },
-    );
-
-    final response = await http.get(uri).timeout(_requestTimeout);
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw Exception('Route API ${response.statusCode}');
-    }
-
-    final decoded = jsonDecode(response.body);
-    if (decoded is! Map<String, dynamic>) {
-      throw Exception('Invalid route response');
-    }
-
-    final routes = decoded['routes'];
-    if (routes is! List || routes.isEmpty) {
-      throw Exception('No routes');
-    }
-
-    final first = routes.first;
-    if (first is! Map<String, dynamic>) {
-      throw Exception('Invalid route object');
-    }
-
-    final geometry = first['geometry'];
-    if (geometry is! Map<String, dynamic>) {
-      throw Exception('Missing geometry');
-    }
-
-    final coordinatesList = geometry['coordinates'];
-    if (coordinatesList is! List || coordinatesList.length < 2) {
-      throw Exception('Route too short');
-    }
-
-    final path = <LatLng>[];
-    for (final item in coordinatesList) {
-      if (item is List && item.length >= 2) {
-        final lon = (item[0] as num?)?.toDouble();
-        final lat = (item[1] as num?)?.toDouble();
-        if (lat != null && lon != null) {
-          path.add(LatLng(lat, lon));
-        }
-      }
-    }
-
-    if (path.length < 2) {
-      throw Exception('Invalid route path');
-    }
-
-    return path;
   }
 
   @override
@@ -205,12 +74,10 @@ class _MapBackdropState extends State<MapBackdrop> {
         widget.driverPoint ??
         MapBackdrop._fallbackCenter;
 
-    final routePoints = <LatLng>[
-      if (widget.pickupPoint != null) widget.pickupPoint!,
-      if (widget.driverPoint != null) widget.driverPoint!,
-      if (widget.dropoffPoint != null) widget.dropoffPoint!,
-    ];
-    final polylinePoints = _roadPolylinePoints ?? routePoints;
+    final fromBackend = widget.routePolylinePoints;
+    final polylinePoints = fromBackend != null && fromBackend.length >= 2
+        ? fromBackend
+        : _fallbackPolylinePoints();
 
     final markers = <Marker>[
       if (widget.currentLocation != null)
