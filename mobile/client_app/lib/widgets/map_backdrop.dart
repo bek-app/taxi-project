@@ -12,7 +12,9 @@ class MapBackdrop extends StatefulWidget {
     this.pickupPoint,
     this.dropoffPoint,
     this.driverPoint,
+    this.driverTrailPolylinePoints,
     this.routePolylinePoints,
+    this.animateRoute = false,
     this.nearbyDriverPoints,
     this.onMapTap,
     this.onPickupDragEnd,
@@ -28,7 +30,9 @@ class MapBackdrop extends StatefulWidget {
   final LatLng? pickupPoint;
   final LatLng? dropoffPoint;
   final LatLng? driverPoint;
+  final List<LatLng>? driverTrailPolylinePoints;
   final List<LatLng>? routePolylinePoints;
+  final bool animateRoute;
   final List<LatLng>? nearbyDriverPoints;
   final ValueChanged<LatLng>? onMapTap;
   final ValueChanged<LatLng>? onPickupDragEnd;
@@ -40,12 +44,25 @@ class MapBackdrop extends StatefulWidget {
   State<MapBackdrop> createState() => _MapBackdropState();
 }
 
-class _MapBackdropState extends State<MapBackdrop> {
+class _MapBackdropState extends State<MapBackdrop>
+    with SingleTickerProviderStateMixin {
   final _mapController = MapController();
+  late final AnimationController _routeAnimationController =
+      AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 2200),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _syncRouteAnimationLoop();
+  }
 
   @override
   void didUpdateWidget(MapBackdrop oldWidget) {
     super.didUpdateWidget(oldWidget);
+    _syncRouteAnimationLoop();
     final newCenter = widget.currentLocation;
     if (newCenter != null && newCenter != oldWidget.currentLocation) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -60,6 +77,7 @@ class _MapBackdropState extends State<MapBackdrop> {
 
   @override
   void dispose() {
+    _routeAnimationController.dispose();
     _mapController.dispose();
     super.dispose();
   }
@@ -80,6 +98,78 @@ class _MapBackdropState extends State<MapBackdrop> {
     return const <LatLng>[];
   }
 
+  void _syncRouteAnimationLoop() {
+    final shouldAnimate = widget.animateRoute;
+    if (shouldAnimate) {
+      if (!_routeAnimationController.isAnimating) {
+        _routeAnimationController.repeat();
+      }
+      return;
+    }
+    if (_routeAnimationController.isAnimating) {
+      _routeAnimationController.stop();
+    }
+  }
+
+  List<LatLng> _routeSlice(
+    List<LatLng> points,
+    double startFraction,
+    double endFraction,
+  ) {
+    if (points.length < 2) {
+      return const <LatLng>[];
+    }
+
+    final segmentCount = points.length - 1;
+    final clampedStart = startFraction.clamp(0.0, 1.0);
+    final clampedEnd = endFraction.clamp(0.0, 1.0);
+    if (clampedEnd <= clampedStart) {
+      return const <LatLng>[];
+    }
+
+    int startIndex = (clampedStart * segmentCount).floor();
+    int endIndex = (clampedEnd * segmentCount).ceil();
+    startIndex = startIndex.clamp(0, points.length - 2);
+    endIndex = endIndex.clamp(startIndex + 1, points.length - 1);
+
+    final slice = points.sublist(startIndex, endIndex + 1);
+    return slice.length >= 2 ? slice : const <LatLng>[];
+  }
+
+  List<Polyline> _animatedRoutePolylines(List<LatLng> points) {
+    if (points.length < 2) {
+      return const <Polyline>[];
+    }
+
+    const span = 0.22;
+    final start = _routeAnimationController.value % 1.0;
+    final end = (start + span) % 1.0;
+
+    final segments = <List<LatLng>>[];
+    if (start < end) {
+      segments.add(_routeSlice(points, start, end));
+    } else {
+      segments.add(_routeSlice(points, start, 1.0));
+      segments.add(_routeSlice(points, 0.0, end));
+    }
+
+    final pulse = Curves.easeInOut.transform(
+      (_routeAnimationController.value * 2) % 1.0,
+    );
+    final alpha = 0.7 + (pulse * 0.25);
+
+    return segments
+        .where((segment) => segment.length >= 2)
+        .map(
+          (segment) => Polyline(
+            points: segment,
+            color: UiKitColors.primary.withValues(alpha: alpha),
+            strokeWidth: 8,
+          ),
+        )
+        .toList(growable: false);
+  }
+
   @override
   Widget build(BuildContext context) {
     final center = widget.currentLocation ??
@@ -92,6 +182,10 @@ class _MapBackdropState extends State<MapBackdrop> {
     final polylinePoints = fromBackend != null && fromBackend.length >= 2
         ? fromBackend
         : _fallbackPolylinePoints();
+    final useAnimatedRoute = widget.animateRoute && polylinePoints.length >= 2;
+    final driverTrail =
+        widget.driverTrailPolylinePoints?.whereType<LatLng>().toList() ??
+            const <LatLng>[];
 
     final usePickupDragMarker =
         widget.pickupPoint != null && widget.pickupDraggable && !kIsWeb;
@@ -196,10 +290,34 @@ class _MapBackdropState extends State<MapBackdrop> {
                 polylines: [
                   Polyline(
                     points: polylinePoints,
-                    color: UiKitColors.primary,
-                    strokeWidth: 6,
+                    color: useAnimatedRoute
+                        ? UiKitColors.primary.withValues(alpha: 0.22)
+                        : UiKitColors.primary,
+                    strokeWidth: useAnimatedRoute ? 5 : 6,
                   ),
                 ],
+              ),
+            if (driverTrail.length >= 2)
+              PolylineLayer(
+                polylines: [
+                  Polyline(
+                    points: driverTrail,
+                    color: const Color(0xFFF59E0B).withValues(alpha: 0.9),
+                    strokeWidth: 7,
+                  ),
+                ],
+              ),
+            if (useAnimatedRoute)
+              AnimatedBuilder(
+                animation: _routeAnimationController,
+                builder: (context, _) {
+                  final animatedPolylines =
+                      _animatedRoutePolylines(polylinePoints);
+                  if (animatedPolylines.isEmpty) {
+                    return const SizedBox.shrink();
+                  }
+                  return PolylineLayer(polylines: animatedPolylines);
+                },
               ),
             if (markers.isNotEmpty) MarkerLayer(markers: markers),
             if (dragMarkers.isNotEmpty) DragMarkers(markers: dragMarkers),

@@ -72,6 +72,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
   Timer? _routeDebounce;
   Timer? _orderPollingTimer;
   Timer? _nearbyDriversTimer;
+  Timer? _driverMotionTimer;
   RouteSnapshot? _routeSnapshot;
   bool _isRouteLoading = false;
   bool _isRouteFallback = false;
@@ -88,6 +89,8 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
   String? _currentAddressLabel;
   LatLng? _lastPickupGeocodedPoint;
   DateTime? _lastPickupGeocodedAt;
+  String? _driverMotionPhaseKey;
+  DateTime? _driverMotionPhaseStartedAt;
 
   LatLng? get _currentLatLng {
     final p = _currentPosition;
@@ -118,9 +121,42 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
   }
 
   LatLng? get _driverPoint {
-    if (_activeOrder?.driverId == null) return null;
+    final order = _activeOrder;
+    if (order?.driverId == null) return null;
+
+    final status = order!.status;
+    if (status == 'DRIVER_ASSIGNED' || status == 'DRIVER_ARRIVING') {
+      final pickup = _pickupPoint;
+      return LatLng(pickup.latitude + 0.0035, pickup.longitude + 0.0045);
+    }
+
+    if (status == 'IN_PROGRESS') {
+      final route = _tripRoutePointsForDriverMotion;
+      if (route == null || route.length < 2) {
+        return _pickupPoint;
+      }
+      final progress = _rideProgress;
+      return _interpolateOnPolyline(route, progress) ?? route.last;
+    }
+
     final pickup = _pickupPoint;
     return LatLng(pickup.latitude + 0.0035, pickup.longitude + 0.0045);
+  }
+
+  List<LatLng>? get _driverTrailPolylinePoints {
+    final order = _activeOrder;
+    if (order?.driverId == null) return null;
+
+    if (order!.status == 'IN_PROGRESS') {
+      final route = _tripRoutePointsForDriverMotion;
+      if (route == null || route.length < 2) {
+        return null;
+      }
+      final trail = _polylinePrefix(route, _rideProgress);
+      return trail.length >= 2 ? trail : null;
+    }
+
+    return null;
   }
 
   double get _fallbackDistanceKm {
@@ -182,6 +218,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     _routeDebounce?.cancel();
     _orderPollingTimer?.cancel();
     _nearbyDriversTimer?.cancel();
+    _driverMotionTimer?.cancel();
     super.dispose();
   }
 
@@ -700,6 +737,35 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     _orderPollingTimer = null;
   }
 
+  void _syncDriverMotionTimer() {
+    final status = _activeOrder?.status;
+    final hasDriver = _activeOrder?.driverId != null;
+    final shouldAnimate = hasDriver && status == 'IN_PROGRESS';
+
+    if (shouldAnimate) {
+      _driverMotionTimer ??= Timer.periodic(
+        const Duration(milliseconds: 850),
+        (_) {
+          if (!mounted) return;
+          setState(() {});
+        },
+      );
+      return;
+    }
+
+    _driverMotionTimer?.cancel();
+    _driverMotionTimer = null;
+  }
+
+  void _updateDriverMotionPhase(BackendOrder? order) {
+    final phaseKey = order == null ? null : '${order.id}:${order.status}';
+    if (phaseKey != _driverMotionPhaseKey) {
+      _driverMotionPhaseKey = phaseKey;
+      _driverMotionPhaseStartedAt = phaseKey == null ? null : DateTime.now();
+    }
+    _syncDriverMotionTimer();
+  }
+
   Future<void> _refreshActiveOrderFromServer({bool showLoader = false}) async {
     final order = _activeOrder;
     if (order == null) return;
@@ -731,9 +797,11 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
 
   void _syncStepWithOrder(BackendOrder order) {
     if (!mounted) return;
+    _updateDriverMotionPhase(order);
 
     if (order.status == 'COMPLETED') {
       _stopOrderPolling();
+      _syncDriverMotionTimer();
       setState(() => _step = ClientFlowStep.completed);
       return;
     }
@@ -745,6 +813,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
         _errorMessage = null;
         _activeOrder = null;
       });
+      _updateDriverMotionPhase(null);
       _refreshNearbyDrivers();
       return;
     }
@@ -764,6 +833,76 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     }
 
     _stopOrderPolling();
+    _syncDriverMotionTimer();
+  }
+
+  List<LatLng>? get _tripRoutePointsForDriverMotion {
+    final route = _routePolylinePoints;
+    if (route != null && route.length >= 2) {
+      return route;
+    }
+    return null;
+  }
+
+  DateTime get _driverMotionStartAt =>
+      _driverMotionPhaseStartedAt ?? DateTime.now();
+
+  double get _rideProgress {
+    final elapsed = DateTime.now().difference(_driverMotionStartAt).inSeconds;
+    final tripSeconds = (_durationMin * 60).clamp(45, 3600).toDouble();
+    return (elapsed / tripSeconds).clamp(0.0, 0.98);
+  }
+
+  LatLng? _interpolateOnPolyline(List<LatLng> points, double fraction) {
+    if (points.isEmpty) return null;
+    if (points.length == 1) return points.first;
+    final clamped = fraction.clamp(0.0, 1.0);
+    if (clamped <= 0) return points.first;
+    if (clamped >= 1) return points.last;
+
+    final totalSegments = points.length - 1;
+    final scaled = clamped * totalSegments;
+    final index = scaled.floor().clamp(0, totalSegments - 1);
+    final t = (scaled - index).clamp(0.0, 1.0);
+
+    final a = points[index];
+    final b = points[index + 1];
+    return LatLng(
+      a.latitude + ((b.latitude - a.latitude) * t),
+      a.longitude + ((b.longitude - a.longitude) * t),
+    );
+  }
+
+  List<LatLng> _polylinePrefix(List<LatLng> points, double fraction) {
+    if (points.length < 2) {
+      return List<LatLng>.from(points);
+    }
+
+    final clamped = fraction.clamp(0.0, 1.0);
+    if (clamped <= 0) {
+      return <LatLng>[points.first];
+    }
+    if (clamped >= 1) {
+      return List<LatLng>.from(points);
+    }
+
+    final totalSegments = points.length - 1;
+    final scaled = clamped * totalSegments;
+    final index = scaled.floor().clamp(0, totalSegments - 1);
+    final t = (scaled - index).clamp(0.0, 1.0);
+
+    final result = <LatLng>[
+      ...points.take(index + 1),
+    ];
+    final a = points[index];
+    final b = points[index + 1];
+    result.add(
+      LatLng(
+        a.latitude + ((b.latitude - a.latitude) * t),
+        a.longitude + ((b.longitude - a.longitude) * t),
+      ),
+    );
+    return result;
   }
 
   // ── Routing estimate (backend) ─────────────────────────────────────────────
@@ -1009,6 +1148,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
       _pickupOverrideLatLng = null;
       _pickupController.clear();
     });
+    _updateDriverMotionPhase(null);
     _stopOrderPolling();
     _refreshNearbyDrivers();
     _scheduleRouteRefresh(delay: Duration.zero);
@@ -1563,6 +1703,9 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     final i18n = _i18n;
     final isWaitingDriverConfirmation =
         _activeOrder?.status == 'DRIVER_ASSIGNED';
+    final isSearchingInProgress = _activeOrder == null ||
+        _activeOrder?.status == 'CREATED' ||
+        _activeOrder?.status == 'SEARCHING_DRIVER';
 
     return Scaffold(
       body: Stack(
@@ -1573,7 +1716,9 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
               pickupPoint: _pickupPoint,
               dropoffPoint: _dropoffPoint,
               driverPoint: _driverPoint,
+              driverTrailPolylinePoints: _driverTrailPolylinePoints,
               routePolylinePoints: _routePolylinePoints,
+              animateRoute: true,
             ),
           ),
           SafeArea(
@@ -1645,6 +1790,13 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                         ),
                       ),
                     ],
+                    if (isSearchingInProgress) ...[
+                      const SizedBox(height: 14),
+                      const _DriverSearchPulse(),
+                    ] else if (isWaitingDriverConfirmation) ...[
+                      const SizedBox(height: 14),
+                      const _DriverSearchPulse(assigned: true),
+                    ],
                     const SizedBox(height: 14),
                     Row(
                       children: [
@@ -1713,6 +1865,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
               pickupPoint: _pickupPoint,
               dropoffPoint: _dropoffPoint,
               driverPoint: _driverPoint,
+              driverTrailPolylinePoints: _driverTrailPolylinePoints,
               routePolylinePoints: _routePolylinePoints,
             ),
           ),
@@ -1893,6 +2046,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                   _errorMessage = null;
                   _step = ClientFlowStep.home;
                 });
+                _updateDriverMotionPhase(null);
                 _stopOrderPolling();
                 _refreshNearbyDrivers();
                 _scheduleRouteRefresh(delay: Duration.zero);
@@ -1936,3 +2090,134 @@ class _ReverseGeocodeInfo {
 }
 
 enum _ActiveSearch { none, pickup, dropoff }
+
+class _DriverSearchPulse extends StatefulWidget {
+  const _DriverSearchPulse({this.assigned = false});
+
+  final bool assigned;
+
+  @override
+  State<_DriverSearchPulse> createState() => _DriverSearchPulseState();
+}
+
+class _DriverSearchPulseState extends State<_DriverSearchPulse>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1700),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  double _loopPhase(double phase) {
+    var value = _controller.value - phase;
+    if (value < 0) value += 1;
+    return value;
+  }
+
+  double _trianglePulse(double value) {
+    final normalized = value < 0.5 ? value * 2 : (1 - value) * 2;
+    return Curves.easeInOut.transform(normalized.clamp(0.0, 1.0));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = widget.assigned ? UiKitColors.success : UiKitColors.primary;
+    final faintColor =
+        widget.assigned ? const Color(0xFFD1FAE5) : const Color(0xFFE0E7FF);
+
+    return Container(
+      height: 112,
+      decoration: BoxDecoration(
+        color: faintColor.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, _) {
+          final pulse = _trianglePulse(_controller.value);
+          return Stack(
+            alignment: Alignment.center,
+            children: [
+              for (final phase in const [0.0, 0.22, 0.44])
+                _buildRing(color, _loopPhase(phase)),
+              Transform.scale(
+                scale: 1 + (pulse * 0.06),
+                child: Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white,
+                    border: Border.all(
+                      color: color.withValues(alpha: 0.25),
+                      width: 2,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: color.withValues(alpha: 0.16 + (pulse * 0.08)),
+                        blurRadius: 18,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
+                  ),
+                  child: Icon(
+                    widget.assigned
+                        ? Icons.verified_user_rounded
+                        : Icons.local_taxi_rounded,
+                    color: color,
+                    size: 28,
+                  ),
+                ),
+              ),
+              Positioned(
+                bottom: 14,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: List.generate(3, (index) {
+                    final dotPhase = _loopPhase(index * 0.16);
+                    final active = 1 - dotPhase;
+                    return Container(
+                      width: 6,
+                      height: 6,
+                      margin: EdgeInsets.only(right: index == 2 ? 0 : 6),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: color.withValues(
+                          alpha: (0.25 + (active * 0.55)).clamp(0.0, 1.0),
+                        ),
+                      ),
+                    );
+                  }),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildRing(Color color, double phase) {
+    final progress = Curves.easeOut.transform(phase.clamp(0.0, 1.0));
+    final size = 36 + (progress * 74);
+    final opacity =
+        ((1 - progress) * (widget.assigned ? 0.14 : 0.2)).clamp(0.0, 1.0);
+
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: color.withValues(alpha: opacity),
+          width: 2,
+        ),
+      ),
+    );
+  }
+}
