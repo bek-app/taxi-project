@@ -8,6 +8,7 @@ import '../api/taxi_api_client.dart';
 import '../core/colors.dart';
 import '../i18n/app_i18n.dart';
 import '../models/backend_order.dart';
+import '../models/route_snapshot.dart';
 import '../widgets/map_backdrop.dart';
 
 class DriverFlowPage extends StatefulWidget {
@@ -31,11 +32,15 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
   String? _error;
   Position? _currentPosition;
   BackendOrder? _activeOrder;
+  RouteSnapshot? _driverRouteSnapshot;
   Timer? _ordersPollingTimer;
+  Timer? _driverRouteDebounce;
   StreamSubscription<Position>? _positionSubscription;
   bool _isSyncingDriverLocation = false;
   DateTime? _lastDriverLocationSyncAt;
   Position? _lastSyncedDriverPosition;
+  String? _driverRouteKey;
+  bool _isDriverRouteLoading = false;
 
   @override
   void initState() {
@@ -47,6 +52,7 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
   @override
   void dispose() {
     _ordersPollingTimer?.cancel();
+    _driverRouteDebounce?.cancel();
     _positionSubscription?.cancel();
     super.dispose();
   }
@@ -85,6 +91,11 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
       return null;
     }
 
+    final routedGeometry = _driverRouteSnapshot?.geometry;
+    if (routedGeometry != null && routedGeometry.length >= 2) {
+      return routedGeometry;
+    }
+
     final driver = _currentLatLng;
     final pickup = _pickupPoint;
     final dropoff = _dropoffPoint;
@@ -102,6 +113,117 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
     }
 
     return null;
+  }
+
+  LatLng? get _driverRouteTargetPoint {
+    final order = _activeOrder;
+    if (order == null || !_isPanelVisibleOrder(order)) {
+      return null;
+    }
+
+    if (order.status == 'IN_PROGRESS') {
+      return _dropoffPoint;
+    }
+
+    if (order.status == 'DRIVER_ASSIGNED' ||
+        order.status == 'DRIVER_ARRIVING' ||
+        order.status == 'DRIVER_ARRIVED') {
+      return _pickupPoint;
+    }
+
+    return null;
+  }
+
+  String _toRouteCoordinate(LatLng point) {
+    return '${point.longitude.toStringAsFixed(6)},${point.latitude.toStringAsFixed(6)}';
+  }
+
+  String _buildDriverRouteKey({
+    required BackendOrder order,
+    required LatLng from,
+    required LatLng to,
+  }) {
+    return '${order.id}|${order.status}|'
+        '${from.latitude.toStringAsFixed(4)},${from.longitude.toStringAsFixed(4)}|'
+        '${to.latitude.toStringAsFixed(5)},${to.longitude.toStringAsFixed(5)}';
+  }
+
+  void _scheduleDriverRouteRefresh(
+      {Duration delay = const Duration(milliseconds: 500)}) {
+    _driverRouteDebounce?.cancel();
+    _driverRouteDebounce = Timer(delay, () {
+      unawaited(_refreshDriverRoute());
+    });
+  }
+
+  Future<void> _refreshDriverRoute() async {
+    final order = _activeOrder;
+    final from = _currentLatLng;
+    final to = _driverRouteTargetPoint;
+    if (order == null ||
+        !_isPanelVisibleOrder(order) ||
+        from == null ||
+        to == null) {
+      if (!mounted) return;
+      if (_driverRouteSnapshot == null &&
+          _driverRouteKey == null &&
+          !_isDriverRouteLoading) {
+        return;
+      }
+      setState(() {
+        _driverRouteSnapshot = null;
+        _driverRouteKey = null;
+        _isDriverRouteLoading = false;
+      });
+      return;
+    }
+
+    final key = _buildDriverRouteKey(order: order, from: from, to: to);
+    if (_driverRouteKey == key &&
+        (_driverRouteSnapshot != null || _isDriverRouteLoading)) {
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _driverRouteKey = key;
+        _isDriverRouteLoading = true;
+      });
+    }
+
+    try {
+      final route = await widget.apiClient.getRoute(
+        coordinates: <String>[
+          _toRouteCoordinate(from),
+          _toRouteCoordinate(to),
+        ],
+      );
+
+      if (!mounted || _driverRouteKey != key) {
+        return;
+      }
+
+      if (route.geometry.length < 2) {
+        setState(() {
+          _driverRouteSnapshot = null;
+          _isDriverRouteLoading = false;
+        });
+        return;
+      }
+
+      setState(() {
+        _driverRouteSnapshot = route;
+        _isDriverRouteLoading = false;
+      });
+    } catch (_) {
+      if (!mounted || _driverRouteKey != key) {
+        return;
+      }
+      setState(() {
+        _driverRouteSnapshot = null;
+        _isDriverRouteLoading = false;
+      });
+    }
   }
 
   double? _pickupDistanceMeters(BackendOrder order) {
@@ -274,6 +396,7 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
         _currentPosition = initial;
         _error = null;
       });
+      _scheduleDriverRouteRefresh(delay: Duration.zero);
       unawaited(_syncDriverLocation(initial, force: true));
 
       await _positionSubscription?.cancel();
@@ -288,6 +411,7 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
           setState(() {
             _currentPosition = position;
           });
+          _scheduleDriverRouteRefresh();
           unawaited(_syncDriverLocation(position));
         },
         onError: (_) {
@@ -402,6 +526,7 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
       _currentPosition = position;
       _error = null;
     });
+    _scheduleDriverRouteRefresh(delay: Duration.zero);
     await _syncDriverLocation(position, force: true);
   }
 
@@ -430,6 +555,7 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
           _error = cancelMessage;
         }
       });
+      _scheduleDriverRouteRefresh(delay: Duration.zero);
       if (cancelMessage != null && cancelMessage.isNotEmpty) {
         _showCancelSnackBar(cancelMessage);
       }
@@ -494,6 +620,7 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
       setState(() {
         _activeOrder = next;
       });
+      _scheduleDriverRouteRefresh(delay: Duration.zero);
     });
   }
 
@@ -512,6 +639,7 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
           _error = cancelMessage;
         }
       });
+      _scheduleDriverRouteRefresh(delay: Duration.zero);
       if (cancelMessage != null) {
         _showCancelSnackBar(cancelMessage);
       }
