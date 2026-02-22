@@ -109,12 +109,44 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
       case 'CLIENT':
         return i18n.t('order_canceled_by_client');
       case 'DRIVER':
-        return i18n.t('order_canceled_by_driver');
+        return i18n.t('order_canceled_by_you');
       case 'ADMIN':
         return i18n.t('order_canceled_by_admin');
       default:
         return i18n.t('order_canceled');
     }
+  }
+
+  void _showCancelSnackBar(String message) {
+    if (!mounted || message.trim().isEmpty) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) return;
+    messenger.hideCurrentMaterialBanner();
+    messenger.showMaterialBanner(
+      MaterialBanner(
+        backgroundColor: const Color(0xFFEFF6FF),
+        surfaceTintColor: Colors.transparent,
+        leading: const Icon(
+          Icons.info_outline_rounded,
+          color: UiKitColors.primary,
+        ),
+        content: Text(
+          message,
+          style: const TextStyle(
+            color: UiKitColors.textPrimary,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        actions: [
+          IconButton(
+            onPressed: messenger.hideCurrentMaterialBanner,
+            icon: const Icon(Icons.close_rounded),
+            color: UiKitColors.primary,
+            tooltip: 'Close',
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _runWithLoader(Future<void> Function() action) async {
@@ -357,7 +389,8 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
 
       if (previousActiveOrder != null && candidate == null) {
         for (final order in orders) {
-          if (order.id == previousActiveOrder.id && order.status == 'CANCELED') {
+          if (order.id == previousActiveOrder.id &&
+              order.status == 'CANCELED') {
             cancelMessage = _canceledOrderMessage(order);
             break;
           }
@@ -372,6 +405,9 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
           _error = cancelMessage;
         }
       });
+      if (cancelMessage != null && cancelMessage.isNotEmpty) {
+        _showCancelSnackBar(cancelMessage);
+      }
     }
 
     if (showLoader) {
@@ -442,12 +478,17 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
     await _runWithLoader(() async {
       final next = await widget.apiClient.updateOrderStatus(order.id, status);
       if (!mounted) return;
+      final cancelMessage =
+          next.status == 'CANCELED' ? _canceledOrderMessage(next) : null;
       setState(() {
         _activeOrder = _isPanelVisibleOrder(next) ? next : null;
-        if (next.status == 'CANCELED') {
-          _error = _canceledOrderMessage(next);
+        if (cancelMessage != null) {
+          _error = cancelMessage;
         }
       });
+      if (cancelMessage != null) {
+        _showCancelSnackBar(cancelMessage);
+      }
     });
   }
 
@@ -605,7 +646,8 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
                                 style: Theme.of(context)
                                     .textTheme
                                     .bodySmall
-                                    ?.copyWith(color: UiKitColors.textSecondary),
+                                    ?.copyWith(
+                                        color: UiKitColors.textSecondary),
                               );
                             }
 
@@ -617,8 +659,7 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
                                   : i18n.t(
                                       'distance_to_pickup',
                                       {
-                                        'meters':
-                                            distance.round().toString(),
+                                        'meters': distance.round().toString(),
                                       },
                                     ),
                               style: Theme.of(context)

@@ -12,4 +12,18 @@ class AuthSession {
   final String userId;
   final String email;
   final AppRole role;
+
+  AuthSession copyWith({
+    String? token,
+    String? userId,
+    String? email,
+    AppRole? role,
+  }) {
+    return AuthSession(
+      token: token ?? this.token,
+      userId: userId ?? this.userId,
+      email: email ?? this.email,
+      role: role ?? this.role,
+    );
+  }
 }

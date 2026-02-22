@@ -9,6 +9,7 @@ import '../models/backend_order.dart';
 import '../models/geocode_result.dart';
 import '../models/nearby_driver.dart';
 import '../models/route_snapshot.dart';
+import '../models/user_profile.dart';
 
 class TaxiApiClient {
   TaxiApiClient({http.Client? client}) : _client = client ?? http.Client();
@@ -68,6 +69,30 @@ class TaxiApiClient {
 
   void clearAuth() {
     _accessToken = null;
+  }
+
+  Future<UserProfile> getMyProfile() async {
+    final response = await _get('/auth/me');
+    return UserProfile.fromJson(_decodeAsMap(response));
+  }
+
+  Future<UserProfile> updateMyProfile({
+    required String email,
+    String? currentPassword,
+    String? newPassword,
+  }) async {
+    final body = <String, dynamic>{
+      'email': email.trim(),
+    };
+    if (currentPassword != null && currentPassword.isNotEmpty) {
+      body['currentPassword'] = currentPassword;
+    }
+    if (newPassword != null && newPassword.isNotEmpty) {
+      body['newPassword'] = newPassword;
+    }
+
+    final response = await _patch('/auth/me', body: body);
+    return UserProfile.fromJson(_decodeAsMap(response));
   }
 
   Future<void> setDriverAvailability(bool online) async {

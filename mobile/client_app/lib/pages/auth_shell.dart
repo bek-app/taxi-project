@@ -5,10 +5,12 @@ import '../api/taxi_api_client.dart';
 import '../i18n/app_i18n.dart';
 import '../models/app_role.dart';
 import '../models/auth_session.dart';
+import '../models/user_profile.dart';
 import 'client_flow_page.dart';
 import 'driver_flow_page.dart';
 import 'login_page.dart';
 import 'orders_page.dart';
+import 'profile_page.dart';
 
 class AuthShell extends StatefulWidget {
   const AuthShell({
@@ -71,12 +73,21 @@ class _AuthShellState extends State<AuthShell> {
   }
 
   Future<void> _onLoggedIn(AuthSession session) async {
+    await _persistSession(session);
+    if (mounted) setState(() => _session = session);
+  }
+
+  Future<void> _onSessionUpdated(AuthSession session) async {
+    await _persistSession(session);
+    if (mounted) setState(() => _session = session);
+  }
+
+  Future<void> _persistSession(AuthSession session) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kToken, session.token);
     await prefs.setString(_kUserId, session.userId);
     await prefs.setString(_kEmail, session.email);
     await prefs.setString(_kRole, session.role.backendValue);
-    if (mounted) setState(() => _session = session);
   }
 
   Future<void> _logout() async {
@@ -111,6 +122,7 @@ class _AuthShellState extends State<AuthShell> {
       apiClient: _apiClient,
       session: session,
       onLogout: _logout,
+      onSessionUpdated: _onSessionUpdated,
       lang: widget.lang,
       onLangChanged: widget.onLangChanged,
     );
@@ -122,6 +134,7 @@ class RoleSwitcherShell extends StatefulWidget {
     required this.apiClient,
     required this.session,
     required this.onLogout,
+    required this.onSessionUpdated,
     required this.lang,
     required this.onLangChanged,
     super.key,
@@ -130,6 +143,7 @@ class RoleSwitcherShell extends StatefulWidget {
   final TaxiApiClient apiClient;
   final AuthSession session;
   final VoidCallback onLogout;
+  final ValueChanged<AuthSession> onSessionUpdated;
   final AppLang lang;
   final ValueChanged<AppLang> onLangChanged;
 
@@ -255,6 +269,36 @@ class _RoleSwitcherShellState extends State<RoleSwitcherShell> {
     );
   }
 
+  Future<void> _openProfilePage() async {
+    final profile = await Navigator.of(context).push<UserProfile>(
+      MaterialPageRoute<UserProfile>(
+        builder: (_) => ProfilePage(
+          apiClient: widget.apiClient,
+          session: widget.session,
+          lang: widget.lang,
+        ),
+      ),
+    );
+    if (!mounted || profile == null) return;
+
+    widget.onSessionUpdated(
+      widget.session.copyWith(
+        userId: profile.id,
+        email: profile.email,
+        role: profile.role,
+      ),
+    );
+
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger?.hideCurrentSnackBar();
+    messenger?.showSnackBar(
+      SnackBar(
+        content: Text(AppI18n(widget.lang).t('profile_saved')),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   Widget _buildSidebarPanel(AppI18n i18n) {
     return Container(
       decoration: BoxDecoration(
@@ -318,6 +362,12 @@ class _RoleSwitcherShellState extends State<RoleSwitcherShell> {
             onPressed: _openOrdersPage,
             icon: const Icon(Icons.receipt_long_rounded),
             label: Text(i18n.t('my_trips')),
+          ),
+          const SizedBox(height: 8),
+          FilledButton.tonalIcon(
+            onPressed: _openProfilePage,
+            icon: const Icon(Icons.person_outline_rounded),
+            label: Text(i18n.t('profile')),
           ),
           const SizedBox(height: 16),
           Text(

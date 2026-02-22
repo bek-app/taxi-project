@@ -40,6 +40,25 @@ class AppI18n {
       'signing_in': 'Кіріп жатыр...',
       'language': 'Тіл',
       'logout': 'Шығу',
+      'profile': 'Профиль',
+      'profile_title': 'Профиль деректері',
+      'profile_subtitle':
+          'Email-ды өзгертіңіз және қажет болса құпиясөзді жаңартыңыз.',
+      'refresh_profile': 'Профильді жаңарту',
+      'profile_user_id': 'Пайдаланушы ID: {id}',
+      'profile_password_section': 'Құпиясөзді ауыстыру',
+      'profile_password_hint':
+          'Құпиясөзді өзгертпесеңіз, төмендегі өрістерді бос қалдырыңыз.',
+      'profile_current_password': 'Ағымдағы құпиясөз',
+      'profile_new_password': 'Жаңа құпиясөз',
+      'profile_confirm_new_password': 'Жаңа құпиясөзді растау',
+      'profile_email_required': 'Email міндетті.',
+      'profile_current_password_required':
+          'Құпиясөзді ауыстыру үшін ағымдағы құпиясөз қажет.',
+      'profile_new_password_min': 'Жаңа құпиясөз кемінде 6 таңба болуы керек.',
+      'save_changes': 'Өзгерістерді сақтау',
+      'saving_changes': 'Сақталуда...',
+      'profile_saved': 'Профиль сәтті жаңартылды.',
       'my_trips': 'Сапарларым',
       'orders_load_failed': 'Сапарларды жүктеу сәтсіз болды.',
       'trips_active': 'Белсенді',
@@ -94,6 +113,7 @@ class AppI18n {
       'order_canceled_by_client': 'Тапсырысты клиент болдырмады.',
       'order_canceled_by_driver': 'Тапсырысты жүргізуші болдырмады.',
       'order_canceled_by_admin': 'Тапсырысты админ болдырмады.',
+      'order_canceled_by_you': 'Тапсырысты сіз болдырмадыңыз.',
       'order_canceled': 'Тапсырыс болдырылды.',
       'active_order_exists':
           'Белсенді тапсырыс бар. Жаңа тапсырыс беру үшін алдымен аяқтаңыз не болдырмаңыз.',
@@ -167,6 +187,25 @@ class AppI18n {
       'signing_in': 'Вход...',
       'language': 'Язык',
       'logout': 'Выйти',
+      'profile': 'Профиль',
+      'profile_title': 'Данные профиля',
+      'profile_subtitle': 'Измените email и при необходимости обновите пароль.',
+      'refresh_profile': 'Обновить профиль',
+      'profile_user_id': 'ID пользователя: {id}',
+      'profile_password_section': 'Смена пароля',
+      'profile_password_hint':
+          'Оставьте поля ниже пустыми, если не хотите менять пароль.',
+      'profile_current_password': 'Текущий пароль',
+      'profile_new_password': 'Новый пароль',
+      'profile_confirm_new_password': 'Подтвердите новый пароль',
+      'profile_email_required': 'Email обязателен.',
+      'profile_current_password_required':
+          'Для смены пароля нужен текущий пароль.',
+      'profile_new_password_min':
+          'Новый пароль должен быть не короче 6 символов.',
+      'save_changes': 'Сохранить изменения',
+      'saving_changes': 'Сохраняем...',
+      'profile_saved': 'Профиль успешно обновлен.',
       'my_trips': 'Мои поездки',
       'orders_load_failed': 'Не удалось загрузить поездки.',
       'trips_active': 'Активные',
@@ -221,6 +260,7 @@ class AppI18n {
       'order_canceled_by_client': 'Заказ отменил клиент.',
       'order_canceled_by_driver': 'Заказ отменил водитель.',
       'order_canceled_by_admin': 'Заказ отменил администратор.',
+      'order_canceled_by_you': 'Заказ отменили вы.',
       'order_canceled': 'Заказ отменен.',
       'active_order_exists':
           'У вас уже есть активный заказ. Завершите или отмените его перед новым заказом.',
@@ -245,7 +285,8 @@ class AppI18n {
       'final_price_label': 'Итоговая цена: {value} KZT',
       'distance_to_pickup': 'До точки подачи: {meters} м',
       'pickup_reached': 'Вы прибыли в точку подачи',
-      'pickup_distance_unknown': 'Расстояние до точки подачи неизвестно (нужен GPS)',
+      'pickup_distance_unknown':
+          'Расстояние до точки подачи неизвестно (нужен GPS)',
       'pickup_arrival_required':
           'Чтобы начать поездку, сначала прибудьте в точку подачи',
       'driver_id': 'Driver ID: {value}',

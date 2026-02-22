@@ -822,14 +822,16 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     }
 
     if (order.status == 'CANCELED') {
+      final cancelMessage = _canceledOrderMessage(order);
       _stopOrderPolling();
       setState(() {
         _step = ClientFlowStep.home;
-        _errorMessage = _canceledOrderMessage(order);
+        _errorMessage = cancelMessage;
         _activeOrder = null;
       });
       _updateDriverMotionPhase(null);
       _refreshNearbyDrivers();
+      _showCancelSnackBar(cancelMessage);
       return;
     }
 
@@ -1040,7 +1042,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
   String _canceledOrderMessage(BackendOrder? order) {
     switch (order?.canceledByRole?.trim().toUpperCase()) {
       case 'CLIENT':
-        return _i18n.t('order_canceled_by_client');
+        return _i18n.t('order_canceled_by_you');
       case 'DRIVER':
         return _i18n.t('order_canceled_by_driver');
       case 'ADMIN':
@@ -1048,6 +1050,38 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
       default:
         return _i18n.t('order_canceled');
     }
+  }
+
+  void _showCancelSnackBar(String message) {
+    if (!mounted || message.trim().isEmpty) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) return;
+    messenger.hideCurrentMaterialBanner();
+    messenger.showMaterialBanner(
+      MaterialBanner(
+        backgroundColor: const Color(0xFFEFF6FF),
+        surfaceTintColor: Colors.transparent,
+        leading: const Icon(
+          Icons.info_outline_rounded,
+          color: UiKitColors.primary,
+        ),
+        content: Text(
+          message,
+          style: const TextStyle(
+            color: UiKitColors.textPrimary,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        actions: [
+          IconButton(
+            onPressed: messenger.hideCurrentMaterialBanner,
+            icon: const Icon(Icons.close_rounded),
+            color: UiKitColors.primary,
+            tooltip: 'Close',
+          ),
+        ],
+      ),
+    );
   }
 
   // ── Order flow ────────────────────────────────────────────────────────────
@@ -1190,6 +1224,9 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     _stopOrderPolling();
     _refreshNearbyDrivers();
     _scheduleRouteRefresh(delay: Duration.zero);
+    if (cancelMessage != null && cancelMessage.isNotEmpty) {
+      _showCancelSnackBar(cancelMessage);
+    }
   }
 
   // ── Screens ───────────────────────────────────────────────────────────────

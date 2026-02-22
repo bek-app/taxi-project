@@ -2,6 +2,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  BadRequestException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -10,6 +11,7 @@ import * as bcrypt from 'bcryptjs';
 import { Repository } from 'typeorm';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { UpdateMeDto } from './dto/update-me.dto';
 import { User } from './entities/user.entity';
 import { AuthResponse } from './types/auth-response.type';
 import { JwtPayload } from './types/jwt-payload.type';
@@ -72,6 +74,50 @@ export class AuthService {
       id: user.id,
       email: user.email,
       role: user.role,
+    };
+  }
+
+  async updateMe(
+    userId: string,
+    dto: UpdateMeDto,
+  ): Promise<{ id: string; email: string; role: UserRole }> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    const nextEmailRaw = dto.email?.trim();
+    if (nextEmailRaw && nextEmailRaw.length > 0) {
+      const normalizedEmail = nextEmailRaw.toLowerCase();
+      if (normalizedEmail !== user.email) {
+        const existing = await this.userRepository.findOne({ where: { email: normalizedEmail } });
+        if (existing && existing.id !== user.id) {
+          throw new ConflictException('Email already exists');
+        }
+        user.email = normalizedEmail;
+      }
+    }
+
+    const newPassword = dto.newPassword?.trim();
+    if (newPassword && newPassword.length > 0) {
+      const currentPassword = dto.currentPassword ?? '';
+      if (!currentPassword) {
+        throw new BadRequestException('Current password is required');
+      }
+
+      const isValidPassword = await bcrypt.compare(currentPassword, user.passwordHash);
+      if (!isValidPassword) {
+        throw new UnauthorizedException('Current password is incorrect');
+      }
+
+      user.passwordHash = await bcrypt.hash(newPassword, 10);
+    }
+
+    const saved = await this.userRepository.save(user);
+    return {
+      id: saved.id,
+      email: saved.email,
+      role: saved.role,
     };
   }
 
