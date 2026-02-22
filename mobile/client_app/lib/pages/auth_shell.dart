@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/taxi_api_client.dart';
+import '../core/colors.dart';
 import '../i18n/app_i18n.dart';
 import '../models/app_role.dart';
 import '../models/auth_session.dart';
@@ -11,6 +12,8 @@ import 'driver_flow_page.dart';
 import 'login_page.dart';
 import 'orders_page.dart';
 import 'profile_page.dart';
+
+enum _ShellView { workspace, orders, profile }
 
 class AuthShell extends StatefulWidget {
   const AuthShell({
@@ -154,6 +157,7 @@ class RoleSwitcherShell extends StatefulWidget {
 class _RoleSwitcherShellState extends State<RoleSwitcherShell> {
   static const double _sidebarWidth = 292;
   late AppRole _activeRole;
+  _ShellView _activeView = _ShellView.workspace;
 
   @override
   void initState() {
@@ -187,7 +191,48 @@ class _RoleSwitcherShellState extends State<RoleSwitcherShell> {
     return '${raw[0].toUpperCase()}${raw.substring(1)}';
   }
 
+  void _showProfileSavedMessage() {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger?.hideCurrentSnackBar();
+    messenger?.showSnackBar(
+      SnackBar(
+        content: Text(AppI18n(widget.lang).t('profile_saved')),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  void _applyProfileUpdate(UserProfile profile) {
+    widget.onSessionUpdated(
+      widget.session.copyWith(
+        userId: profile.id,
+        email: profile.email,
+        role: profile.role,
+      ),
+    );
+    _showProfileSavedMessage();
+  }
+
   Widget _buildMainContent() {
+    switch (_activeView) {
+      case _ShellView.orders:
+        return OrdersPage(
+          apiClient: widget.apiClient,
+          lang: widget.lang,
+        );
+      case _ShellView.profile:
+        return ProfilePage(
+          apiClient: widget.apiClient,
+          session: widget.session,
+          lang: widget.lang,
+          onLangChanged: widget.onLangChanged,
+          popOnSave: false,
+          onSaved: _applyProfileUpdate,
+        );
+      case _ShellView.workspace:
+        break;
+    }
+
     return IndexedStack(
       index: _activeRole == AppRole.driver ? 1 : 0,
       children: [
@@ -223,7 +268,10 @@ class _RoleSwitcherShellState extends State<RoleSwitcherShell> {
       selected: <AppRole>{_activeRole},
       onSelectionChanged: (selected) {
         if (selected.isNotEmpty) {
-          setState(() => _activeRole = selected.first);
+          setState(() {
+            _activeRole = selected.first;
+            _activeView = _ShellView.workspace;
+          });
         }
       },
       showSelectedIcon: false,
@@ -234,31 +282,32 @@ class _RoleSwitcherShellState extends State<RoleSwitcherShell> {
     );
   }
 
-  Widget _buildLanguageSwitcher() {
-    return SegmentedButton<AppLang>(
-      segments: AppLang.values
-          .map(
-            (lang) => ButtonSegment<AppLang>(
-              value: lang,
-              label: Text(lang.code),
-            ),
-          )
-          .toList(),
-      selected: <AppLang>{widget.lang},
-      onSelectionChanged: (selection) {
-        if (selection.isNotEmpty) {
-          widget.onLangChanged(selection.first);
-        }
-      },
-      showSelectedIcon: false,
-      style: const ButtonStyle(
-        visualDensity: VisualDensity.compact,
-        side: WidgetStatePropertyAll(BorderSide.none),
-      ),
-    );
+  Future<void> _closeDrawerIfOpen() async {
+    final scaffold = Scaffold.maybeOf(context);
+    if (scaffold?.isDrawerOpen ?? false) {
+      Navigator.of(context).pop();
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+    }
   }
 
-  Future<void> _openOrdersPage() async {
+  Future<void> _openWorkspace({required bool isWideLayout}) async {
+    if (isWideLayout) {
+      if (!mounted) return;
+      setState(() => _activeView = _ShellView.workspace);
+      return;
+    }
+    await _closeDrawerIfOpen();
+  }
+
+  Future<void> _openOrdersPage({required bool isWideLayout}) async {
+    if (isWideLayout) {
+      if (!mounted) return;
+      setState(() => _activeView = _ShellView.orders);
+      return;
+    }
+
+    await _closeDrawerIfOpen();
+    if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => OrdersPage(
@@ -269,37 +318,100 @@ class _RoleSwitcherShellState extends State<RoleSwitcherShell> {
     );
   }
 
-  Future<void> _openProfilePage() async {
+  Future<void> _openProfilePage({required bool isWideLayout}) async {
+    if (isWideLayout) {
+      if (!mounted) return;
+      setState(() => _activeView = _ShellView.profile);
+      return;
+    }
+
+    await _closeDrawerIfOpen();
+    if (!mounted) return;
     final profile = await Navigator.of(context).push<UserProfile>(
       MaterialPageRoute<UserProfile>(
         builder: (_) => ProfilePage(
           apiClient: widget.apiClient,
           session: widget.session,
           lang: widget.lang,
+          onLangChanged: widget.onLangChanged,
         ),
       ),
     );
     if (!mounted || profile == null) return;
+    _applyProfileUpdate(profile);
+  }
 
-    widget.onSessionUpdated(
-      widget.session.copyWith(
-        userId: profile.id,
-        email: profile.email,
-        role: profile.role,
-      ),
-    );
-
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    messenger?.hideCurrentSnackBar();
-    messenger?.showSnackBar(
-      SnackBar(
-        content: Text(AppI18n(widget.lang).t('profile_saved')),
-        behavior: SnackBarBehavior.floating,
+  Widget _buildSidebarActionTile({
+    required IconData icon,
+    required String title,
+    required VoidCallback onTap,
+    bool selected = false,
+  }) {
+    return Material(
+      color: selected ? const Color(0xFFE8F0FF) : const Color(0xFFF8FAFC),
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: selected ? const Color(0xFFDCE7FF) : Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  icon,
+                  size: 18,
+                  color: selected ? UiKitColors.primary : null,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: selected ? UiKitColors.primary : null,
+                  ),
+                ),
+              ),
+              Icon(
+                selected
+                    ? Icons.radio_button_checked_rounded
+                    : Icons.chevron_right_rounded,
+                color: selected ? UiKitColors.primary : const Color(0xFF94A3B8),
+                size: selected ? 18 : 24,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
 
-  Widget _buildSidebarPanel(AppI18n i18n) {
+  Widget _buildSidebarSection({required Widget child}) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: child,
+    );
+  }
+
+  Widget _buildSidebarPanel(
+    AppI18n i18n, {
+    required bool isDrawer,
+    required bool isWideLayout,
+  }) {
+    final canSwitchRole = _allowedRoles.length > 1;
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xEBFFFFFF),
@@ -312,82 +424,191 @@ class _RoleSwitcherShellState extends State<RoleSwitcherShell> {
           ),
         ],
       ),
-      child: ListView(
-        padding: const EdgeInsets.all(12),
+      child: Column(
         children: [
-          Text(
-            i18n.t('app_title'),
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF8FAFC),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+            child: Row(
               children: [
-                Text(
-                  _displayName,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
+                Expanded(
+                  child: Text(
+                    i18n.t('app_title'),
+                    style: Theme.of(context).textTheme.titleLarge,
                   ),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  widget.session.email,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: Color(0xFF64748B),
-                    fontWeight: FontWeight.w500,
+                if (isDrawer)
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close_rounded),
+                    tooltip: 'Close',
                   ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  _activeRole.label(widget.lang),
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: Color(0xFF0F766E),
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
               ],
             ),
           ),
-          const SizedBox(height: 14),
-          FilledButton.tonalIcon(
-            onPressed: _openOrdersPage,
-            icon: const Icon(Icons.receipt_long_rounded),
-            label: Text(i18n.t('my_trips')),
+          Expanded(
+            child: Scrollbar(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 34,
+                              height: 34,
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Icon(
+                                Icons.person_outline_rounded,
+                                size: 18,
+                                color: Color(0xFF334155),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    _displayName,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    widget.session.email,
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Color(0xFF64748B),
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFECFDF5),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                _activeRole.label(widget.lang),
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Color(0xFF0F766E),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _buildSidebarSection(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          i18n.t('workspace'),
+                          style:
+                              Theme.of(context).textTheme.labelLarge?.copyWith(
+                                    color: const Color(0xFF64748B),
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                        ),
+                        const SizedBox(height: 8),
+                        _buildSidebarActionTile(
+                          onTap: () {
+                            _openWorkspace(isWideLayout: isWideLayout);
+                          },
+                          icon: Icons.dashboard_outlined,
+                          title: i18n.t('workspace'),
+                          selected: isWideLayout &&
+                              _activeView == _ShellView.workspace,
+                        ),
+                        const SizedBox(height: 8),
+                        _buildSidebarActionTile(
+                          onTap: () {
+                            _openOrdersPage(isWideLayout: isWideLayout);
+                          },
+                          icon: Icons.receipt_long_rounded,
+                          title: i18n.t('my_trips'),
+                          selected:
+                              isWideLayout && _activeView == _ShellView.orders,
+                        ),
+                        const SizedBox(height: 8),
+                        _buildSidebarActionTile(
+                          onTap: () {
+                            _openProfilePage(isWideLayout: isWideLayout);
+                          },
+                          icon: Icons.person_outline_rounded,
+                          title: i18n.t('profile'),
+                          selected:
+                              isWideLayout && _activeView == _ShellView.profile,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  if (canSwitchRole) ...[
+                    _buildSidebarSection(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            i18n.t('register_as_label'),
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelLarge
+                                ?.copyWith(
+                                  color: const Color(0xFF64748B),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                          const SizedBox(height: 8),
+                          _buildRoleSwitcher(),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                ],
+              ),
+            ),
           ),
-          const SizedBox(height: 8),
-          FilledButton.tonalIcon(
-            onPressed: _openProfilePage,
-            icon: const Icon(Icons.person_outline_rounded),
-            label: Text(i18n.t('profile')),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            i18n.t('register_as_label'),
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 8),
-          _buildRoleSwitcher(),
-          const SizedBox(height: 14),
-          Text(
-            i18n.t('language'),
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 8),
-          _buildLanguageSwitcher(),
-          const SizedBox(height: 16),
-          OutlinedButton.icon(
-            onPressed: widget.onLogout,
-            icon: const Icon(Icons.logout),
-            label: Text(i18n.t('logout')),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: OutlinedButton.icon(
+              onPressed: widget.onLogout,
+              icon: const Icon(Icons.logout),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              label: Text(i18n.t('logout')),
+            ),
           ),
         ],
       ),
@@ -400,7 +621,14 @@ class _RoleSwitcherShellState extends State<RoleSwitcherShell> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final isWide = constraints.maxWidth >= 1080;
-        final sidebar = _buildSidebarPanel(i18n);
+        final sidebar = _buildSidebarPanel(
+          i18n,
+          isDrawer: !isWide,
+          isWideLayout: isWide,
+        );
+        final drawerWidth = constraints.maxWidth < 380
+            ? constraints.maxWidth - 16
+            : _sidebarWidth;
 
         if (isWide) {
           return Scaffold(
@@ -423,7 +651,7 @@ class _RoleSwitcherShellState extends State<RoleSwitcherShell> {
 
         return Scaffold(
           drawer: Drawer(
-            width: _sidebarWidth,
+            width: drawerWidth,
             child: SafeArea(
               child: Padding(
                 padding: const EdgeInsets.all(12),

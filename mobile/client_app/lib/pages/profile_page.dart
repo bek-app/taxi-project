@@ -12,12 +12,18 @@ class ProfilePage extends StatefulWidget {
     required this.apiClient,
     required this.session,
     required this.lang,
+    this.onSaved,
+    this.onLangChanged,
+    this.popOnSave = true,
     super.key,
   });
 
   final TaxiApiClient apiClient;
   final AuthSession session;
   final AppLang lang;
+  final ValueChanged<UserProfile>? onSaved;
+  final ValueChanged<AppLang>? onLangChanged;
+  final bool popOnSave;
 
   @override
   State<ProfilePage> createState() => _ProfilePageState();
@@ -38,14 +44,24 @@ class _ProfilePageState extends State<ProfilePage> {
   bool _obscureConfirm = true;
   String? _error;
   UserProfile? _profile;
+  late AppLang _pageLang;
 
-  AppI18n get _i18n => AppI18n(widget.lang);
+  AppI18n get _i18n => AppI18n(_pageLang);
 
   @override
   void initState() {
     super.initState();
+    _pageLang = widget.lang;
     _emailController.text = widget.session.email;
     _loadProfile();
+  }
+
+  @override
+  void didUpdateWidget(covariant ProfilePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.lang != widget.lang && _pageLang != widget.lang) {
+      _pageLang = widget.lang;
+    }
   }
 
   @override
@@ -136,7 +152,10 @@ class _ProfilePageState extends State<ProfilePage> {
       _newPasswordController.clear();
       _confirmNewPasswordController.clear();
 
-      Navigator.of(context).pop(profile);
+      widget.onSaved?.call(profile);
+      if (widget.popOnSave) {
+        Navigator.of(context).pop(profile);
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -149,6 +168,31 @@ class _ProfilePageState extends State<ProfilePage> {
         });
       }
     }
+  }
+
+  Widget _buildLanguageSwitcher() {
+    return SegmentedButton<AppLang>(
+      segments: AppLang.values
+          .map(
+            (lang) => ButtonSegment<AppLang>(
+              value: lang,
+              label: Text(lang.code),
+            ),
+          )
+          .toList(),
+      selected: <AppLang>{_pageLang},
+      onSelectionChanged: (selection) {
+        if (selection.isEmpty) return;
+        final next = selection.first;
+        if (next == _pageLang) return;
+        setState(() => _pageLang = next);
+        widget.onLangChanged?.call(next);
+      },
+      showSelectedIcon: false,
+      style: const ButtonStyle(
+        visualDensity: VisualDensity.compact,
+      ),
+    );
   }
 
   @override
@@ -219,12 +263,21 @@ class _ProfilePageState extends State<ProfilePage> {
                             Chip(
                               avatar:
                                   const Icon(Icons.shield_outlined, size: 18),
-                              label: Text(profile.role.label(widget.lang)),
+                              label: Text(profile.role.label(_pageLang)),
                             ),
                           ],
                         ),
                         const SizedBox(height: 12),
                       ],
+                      Text(
+                        i18n.t('language'),
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                      const SizedBox(height: 8),
+                      _buildLanguageSwitcher(),
+                      const SizedBox(height: 12),
                       TextField(
                         controller: _emailController,
                         keyboardType: TextInputType.emailAddress,

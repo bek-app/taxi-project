@@ -19,6 +19,7 @@ class AppI18n {
   static const Map<AppLang, Map<String, String>> _strings = {
     AppLang.kz: {
       'app_title': 'Taxi MVP',
+      'workspace': 'Жұмыс аймағы',
       'role_client': 'Жолаушы',
       'role_driver': 'Жүргізуші',
       'role_admin': 'Админ',
@@ -166,6 +167,7 @@ class AppI18n {
     },
     AppLang.ru: {
       'app_title': 'Taxi MVP',
+      'workspace': 'Рабочая область',
       'role_client': 'Клиент',
       'role_driver': 'Водитель',
       'role_admin': 'Админ',
