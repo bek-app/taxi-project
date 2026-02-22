@@ -4,6 +4,10 @@ class BackendOrder {
     required this.status,
     required this.finalPrice,
     required this.driverId,
+    required this.driverLatitude,
+    required this.driverLongitude,
+    required this.canceledByRole,
+    required this.canceledByUserId,
     required this.pickupLatitude,
     required this.pickupLongitude,
     required this.dropoffLatitude,
@@ -14,6 +18,10 @@ class BackendOrder {
   final String status;
   final double finalPrice;
   final String? driverId;
+  final double? driverLatitude;
+  final double? driverLongitude;
+  final String? canceledByRole;
+  final String? canceledByUserId;
   final double? pickupLatitude;
   final double? pickupLongitude;
   final double? dropoffLatitude;
@@ -31,6 +39,10 @@ class BackendOrder {
     }
 
     final dynamic rawDriverId = json['driverId'];
+    final dynamic rawDriverLatitude = json['driverLatitude'];
+    final dynamic rawDriverLongitude = json['driverLongitude'];
+    final dynamic rawCanceledByRole = json['canceledByRole'];
+    final dynamic rawCanceledByUserId = json['canceledByUserId'];
 
     double? toNullableDouble(dynamic value) {
       if (value == null) return null;
@@ -43,6 +55,10 @@ class BackendOrder {
       status: (json['status'] ?? '').toString(),
       finalPrice: parsedPrice,
       driverId: rawDriverId?.toString(),
+      driverLatitude: toNullableDouble(rawDriverLatitude),
+      driverLongitude: toNullableDouble(rawDriverLongitude),
+      canceledByRole: rawCanceledByRole?.toString(),
+      canceledByUserId: rawCanceledByUserId?.toString(),
       pickupLatitude: toNullableDouble(json['pickupLatitude']),
       pickupLongitude: toNullableDouble(json['pickupLongitude']),
       dropoffLatitude: toNullableDouble(json['dropoffLatitude']),

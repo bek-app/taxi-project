@@ -103,6 +103,20 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
     return distance != null && distance <= _pickupArrivalRadiusMeters;
   }
 
+  String _canceledOrderMessage(BackendOrder? order) {
+    final i18n = AppI18n(widget.lang);
+    switch (order?.canceledByRole?.trim().toUpperCase()) {
+      case 'CLIENT':
+        return i18n.t('order_canceled_by_client');
+      case 'DRIVER':
+        return i18n.t('order_canceled_by_driver');
+      case 'ADMIN':
+        return i18n.t('order_canceled_by_admin');
+      default:
+        return i18n.t('order_canceled');
+    }
+  }
+
   Future<void> _runWithLoader(Future<void> Function() action) async {
     setState(() {
       _busy = true;
@@ -336,13 +350,27 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
 
   Future<void> _refreshOrders({bool showLoader = true}) async {
     Future<void> action() async {
+      final previousActiveOrder = _activeOrder;
       final orders = await widget.apiClient.listOrders();
       final candidate = _pickActiveOrder(orders);
+      String? cancelMessage;
+
+      if (previousActiveOrder != null && candidate == null) {
+        for (final order in orders) {
+          if (order.id == previousActiveOrder.id && order.status == 'CANCELED') {
+            cancelMessage = _canceledOrderMessage(order);
+            break;
+          }
+        }
+      }
 
       if (!mounted) return;
 
       setState(() {
         _activeOrder = candidate;
+        if (cancelMessage != null && cancelMessage.isNotEmpty) {
+          _error = cancelMessage;
+        }
       });
     }
 
@@ -416,6 +444,9 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
       if (!mounted) return;
       setState(() {
         _activeOrder = _isPanelVisibleOrder(next) ? next : null;
+        if (next.status == 'CANCELED') {
+          _error = _canceledOrderMessage(next);
+        }
       });
     });
   }

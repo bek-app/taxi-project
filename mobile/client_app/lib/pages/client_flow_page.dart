@@ -124,7 +124,13 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     final order = _activeOrder;
     if (order?.driverId == null) return null;
 
-    final status = order!.status;
+    final driverLat = order!.driverLatitude;
+    final driverLng = order.driverLongitude;
+    if (driverLat != null && driverLng != null) {
+      return LatLng(driverLat, driverLng);
+    }
+
+    final status = order.status;
     if (status == 'DRIVER_ASSIGNED' || status == 'DRIVER_ARRIVING') {
       final pickup = _pickupPoint;
       return LatLng(pickup.latitude + 0.0035, pickup.longitude + 0.0045);
@@ -146,8 +152,11 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
   List<LatLng>? get _driverTrailPolylinePoints {
     final order = _activeOrder;
     if (order?.driverId == null) return null;
+    if (order!.driverLatitude != null && order.driverLongitude != null) {
+      return null;
+    }
 
-    if (order!.status == 'IN_PROGRESS') {
+    if (order.status == 'IN_PROGRESS') {
       final route = _tripRoutePointsForDriverMotion;
       if (route == null || route.length < 2) {
         return null;
@@ -740,7 +749,10 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
   void _syncDriverMotionTimer() {
     final status = _activeOrder?.status;
     final hasDriver = _activeOrder?.driverId != null;
-    final shouldAnimate = hasDriver && status == 'IN_PROGRESS';
+    final hasActualDriverLocation = _activeOrder?.driverLatitude != null &&
+        _activeOrder?.driverLongitude != null;
+    final shouldAnimate =
+        hasDriver && status == 'IN_PROGRESS' && !hasActualDriverLocation;
 
     if (shouldAnimate) {
       _driverMotionTimer ??= Timer.periodic(
@@ -769,6 +781,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
   Future<void> _refreshActiveOrderFromServer({bool showLoader = false}) async {
     final order = _activeOrder;
     if (order == null) return;
+    final requestedOrderId = order.id;
 
     if (showLoader) {
       if (_isSubmitting) return;
@@ -781,15 +794,17 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     try {
       final fresh = await widget.apiClient.getOrder(order.id);
       if (!mounted) return;
+      if (_activeOrder?.id != requestedOrderId) return;
       setState(() {
         _activeOrder = fresh;
       });
       _syncStepWithOrder(fresh);
     } catch (error) {
+      if (_activeOrder?.id != requestedOrderId) return;
       if (!mounted || !showLoader) return;
       setState(() => _errorMessage = error.toString());
     } finally {
-      if (mounted && showLoader) {
+      if (mounted && showLoader && _activeOrder?.id == requestedOrderId) {
         setState(() => _isSubmitting = false);
       }
     }
@@ -810,7 +825,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
       _stopOrderPolling();
       setState(() {
         _step = ClientFlowStep.home;
-        _errorMessage = null;
+        _errorMessage = _canceledOrderMessage(order);
         _activeOrder = null;
       });
       _updateDriverMotionPhase(null);
@@ -1022,6 +1037,19 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     return UiKitColors.textSecondary;
   }
 
+  String _canceledOrderMessage(BackendOrder? order) {
+    switch (order?.canceledByRole?.trim().toUpperCase()) {
+      case 'CLIENT':
+        return _i18n.t('order_canceled_by_client');
+      case 'DRIVER':
+        return _i18n.t('order_canceled_by_driver');
+      case 'ADMIN':
+        return _i18n.t('order_canceled_by_admin');
+      default:
+        return _i18n.t('order_canceled');
+    }
+  }
+
   // ── Order flow ────────────────────────────────────────────────────────────
 
   Future<void> _confirmRideAndRequestDriver() async {
@@ -1099,6 +1127,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     if (_isDriverSearchInFlight) return;
     final order = _activeOrder;
     if (order == null) return;
+    final requestedOrderId = order.id;
 
     _isDriverSearchInFlight = true;
 
@@ -1112,6 +1141,7 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     try {
       final assigned = await widget.apiClient.searchDriver(order.id);
       if (!mounted) return;
+      if (_activeOrder?.id != requestedOrderId) return;
       setState(() => _activeOrder = assigned);
       _scheduleRouteRefresh(delay: Duration.zero);
       _syncStepWithOrder(assigned);
@@ -1125,24 +1155,32 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
       }
     } catch (error) {
       if (!mounted) return;
+      if (_activeOrder?.id != requestedOrderId) return;
       setState(() => _errorMessage = error.toString());
     } finally {
       _isDriverSearchInFlight = false;
-      if (mounted && showLoader) setState(() => _isSubmitting = false);
+      if (mounted && showLoader && _activeOrder?.id == requestedOrderId) {
+        setState(() => _isSubmitting = false);
+      }
     }
   }
 
   Future<void> _cancelOrderAndGoHome() async {
     final order = _activeOrder;
+    String? cancelMessage;
     if (order != null && order.canBeCanceled) {
       try {
-        await widget.apiClient.updateOrderStatus(order.id, 'CANCELED');
+        final canceled = await widget.apiClient.updateOrderStatus(
+          order.id,
+          'CANCELED',
+        );
+        cancelMessage = _canceledOrderMessage(canceled);
       } catch (_) {}
     }
     if (!mounted) return;
     setState(() {
       _activeOrder = null;
-      _errorMessage = null;
+      _errorMessage = cancelMessage;
       _isSubmitting = false;
       _step = ClientFlowStep.home;
       _pickupOverrideLatLng = null;
@@ -1657,6 +1695,16 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
                     if (hasBlockingActiveOrder) ...[
                       Text(
                         i18n.t('active_order_exists'),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: UiKitColors.danger,
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                    if (_errorMessage != null) ...[
+                      Text(
+                        _errorMessage!,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: UiKitColors.danger,
                               fontWeight: FontWeight.w600,

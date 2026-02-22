@@ -41,20 +41,23 @@ export class OrdersService {
 
   async listOrders(user: AuthUser): Promise<Order[]> {
     if (user.role === UserRole.ADMIN) {
-      return this.orderRepository.find({ order: { createdAt: 'DESC' } });
+      const orders = await this.orderRepository.find({ order: { createdAt: 'DESC' } });
+      return this.attachDriverLocations(orders);
     }
 
     if (user.role === UserRole.CLIENT) {
-      return this.orderRepository.find({
+      const orders = await this.orderRepository.find({
         where: { passengerId: user.userId },
         order: { createdAt: 'DESC' },
       });
+      return this.attachDriverLocations(orders);
     }
 
-    return this.orderRepository.find({
+    const orders = await this.orderRepository.find({
       where: { driverId: user.userId },
       order: { createdAt: 'DESC' },
     });
+    return this.attachDriverLocations(orders);
   }
 
   async getOrderById(orderId: string, user?: AuthUser): Promise<Order> {
@@ -68,6 +71,11 @@ export class OrdersService {
     }
 
     return order;
+  }
+
+  async getOrderForResponse(orderId: string, user?: AuthUser): Promise<Order> {
+    const order = await this.getOrderById(orderId, user);
+    return this.attachDriverLocation(order);
   }
 
   async createOrder(dto: CreateOrderDto, _user?: AuthUser): Promise<Order> {
@@ -91,6 +99,8 @@ export class OrdersService {
     const order = this.orderRepository.create({
       passengerId: dto.passengerId,
       driverId: null,
+      canceledByRole: null,
+      canceledByUserId: null,
       cityId: dto.cityId ?? null,
       pickupLatitude: dto.pickupLatitude,
       pickupLongitude: dto.pickupLongitude,
@@ -108,7 +118,7 @@ export class OrdersService {
 
     const saved = await this.orderRepository.save(order);
     this.orderEventsGateway.emitOrderUpdated(saved);
-    return saved;
+    return this.attachDriverLocation(saved);
   }
 
   async searchDriver(orderId: string, user: AuthUser): Promise<Order> {
@@ -135,7 +145,7 @@ export class OrdersService {
     const saved = await this.orderRepository.save(order);
     await this.matchmakingService.setDriverBusy(driverId, true);
     this.orderEventsGateway.emitOrderUpdated(saved);
-    return saved;
+    return this.attachDriverLocation(saved);
   }
 
   async updateOrderStatus(
@@ -161,6 +171,14 @@ export class OrdersService {
       await this.assertDriverReachedPickup(order);
     }
 
+    if (nextStatus === OrderStatus.CANCELED) {
+      order.canceledByRole = user.role;
+      order.canceledByUserId = user.userId;
+    } else if (order.status !== OrderStatus.CANCELED) {
+      order.canceledByRole = null;
+      order.canceledByUserId = null;
+    }
+
     order.status = nextStatus;
     const saved = await this.orderRepository.save(order);
 
@@ -176,7 +194,7 @@ export class OrdersService {
     }
 
     this.orderEventsGateway.emitOrderUpdated(saved);
-    return saved;
+    return this.attachDriverLocation(saved);
   }
 
   private assertCanViewOrder(user: AuthUser, order: Order): void {
@@ -315,5 +333,31 @@ export class OrdersService {
       Math.cos(lat1Rad) * Math.cos(lat2Rad) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return earthRadiusMeters * c;
+  }
+
+  private async attachDriverLocations(orders: Order[]): Promise<Order[]> {
+    if (orders.length === 0) {
+      return orders;
+    }
+
+    return Promise.all(orders.map((order) => this.attachDriverLocation(order)));
+  }
+
+  private async attachDriverLocation(order: Order): Promise<Order> {
+    let driverLatitude: number | null = null;
+    let driverLongitude: number | null = null;
+
+    if (order.driverId) {
+      const driverLocation = await this.redisGeoService.getDriverLocation(order.driverId);
+      if (driverLocation) {
+        driverLatitude = driverLocation.latitude;
+        driverLongitude = driverLocation.longitude;
+      }
+    }
+
+    return Object.assign(order, {
+      driverLatitude,
+      driverLongitude,
+    });
   }
 }

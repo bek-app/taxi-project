@@ -36,7 +36,7 @@ export class OrdersController {
     @Req() req: { user: AuthUser },
     @Param('orderId', new ParseUUIDPipe()) orderId: string,
   ): Promise<Order> {
-    return this.ordersService.getOrderById(orderId, req.user);
+    return this.ordersService.getOrderForResponse(orderId, req.user);
   }
 
   @Post()

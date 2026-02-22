@@ -13,6 +13,12 @@ export class Order {
   @Column({ type: 'uuid', nullable: true })
   driverId!: string | null;
 
+  @Column({ type: 'varchar', length: 16, nullable: true })
+  canceledByRole!: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  canceledByUserId!: string | null;
+
   @Column({ type: 'varchar', length: 32 })
   status!: OrderStatus;
 

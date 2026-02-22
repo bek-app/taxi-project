@@ -91,6 +91,10 @@ class AppI18n {
       'retry_search': 'Қайта іздеу',
       'cancel': 'Бас тарту',
       'driver_not_found': 'Жүргізуші табылмады. Қайта іздеп көріңіз.',
+      'order_canceled_by_client': 'Тапсырысты клиент болдырмады.',
+      'order_canceled_by_driver': 'Тапсырысты жүргізуші болдырмады.',
+      'order_canceled_by_admin': 'Тапсырысты админ болдырмады.',
+      'order_canceled': 'Тапсырыс болдырылды.',
       'active_order_exists':
           'Белсенді тапсырыс бар. Жаңа тапсырыс беру үшін алдымен аяқтаңыз не болдырмаңыз.',
       'active_order_exists_short': 'Белсенді тапсырыс бар',
@@ -214,6 +218,10 @@ class AppI18n {
       'retry_search': 'Повторить поиск',
       'cancel': 'Отмена',
       'driver_not_found': 'Водитель не найден. Попробуйте еще раз.',
+      'order_canceled_by_client': 'Заказ отменил клиент.',
+      'order_canceled_by_driver': 'Заказ отменил водитель.',
+      'order_canceled_by_admin': 'Заказ отменил администратор.',
+      'order_canceled': 'Заказ отменен.',
       'active_order_exists':
           'У вас уже есть активный заказ. Завершите или отмените его перед новым заказом.',
       'active_order_exists_short': 'Есть активный заказ',
