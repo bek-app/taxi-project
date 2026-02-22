@@ -25,6 +25,7 @@ class DriverFlowPage extends StatefulWidget {
 }
 
 class _DriverFlowPageState extends State<DriverFlowPage> {
+  static const double _pickupArrivalRadiusMeters = 120;
   bool _online = false;
   bool _busy = false;
   String? _error;
@@ -76,6 +77,30 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
       return null;
     }
     return LatLng(order.dropoffLatitude!, order.dropoffLongitude!);
+  }
+
+  double? _pickupDistanceMeters(BackendOrder order) {
+    final current = _currentPosition;
+    final pickupLat = order.pickupLatitude;
+    final pickupLon = order.pickupLongitude;
+    if (current == null || pickupLat == null || pickupLon == null) {
+      return null;
+    }
+
+    return Geolocator.distanceBetween(
+      current.latitude,
+      current.longitude,
+      pickupLat,
+      pickupLon,
+    );
+  }
+
+  bool _canStartRide(BackendOrder order) {
+    if (order.status != 'DRIVER_ARRIVING') {
+      return true;
+    }
+    final distance = _pickupDistanceMeters(order);
+    return distance != null && distance <= _pickupArrivalRadiusMeters;
   }
 
   Future<void> _runWithLoader(Future<void> Function() action) async {
@@ -538,6 +563,46 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
                           {'value': panelOrder.finalPrice.toStringAsFixed(0)},
                         ),
                       ),
+                      if (panelOrder.status == 'DRIVER_ARRIVING') ...[
+                        const SizedBox(height: 4),
+                        Builder(
+                          builder: (context) {
+                            final distance = _pickupDistanceMeters(panelOrder);
+                            if (distance == null) {
+                              return Text(
+                                i18n.t('pickup_distance_unknown'),
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(color: UiKitColors.textSecondary),
+                              );
+                            }
+
+                            final reached =
+                                distance <= _pickupArrivalRadiusMeters;
+                            return Text(
+                              reached
+                                  ? i18n.t('pickup_reached')
+                                  : i18n.t(
+                                      'distance_to_pickup',
+                                      {
+                                        'meters':
+                                            distance.round().toString(),
+                                      },
+                                    ),
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                    color: reached
+                                        ? UiKitColors.success
+                                        : UiKitColors.textSecondary,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                            );
+                          },
+                        ),
+                      ],
                     ],
                     if (_currentPosition != null) ...[
                       const SizedBox(height: 6),
@@ -556,6 +621,18 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
                           color: UiKitColors.danger,
                           fontWeight: FontWeight.w600,
                         ),
+                      ),
+                    ],
+                    if (panelOrder != null &&
+                        panelOrder.status == 'DRIVER_ARRIVING' &&
+                        !_canStartRide(panelOrder)) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        i18n.t('pickup_arrival_required'),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: UiKitColors.danger,
+                              fontWeight: FontWeight.w600,
+                            ),
                       ),
                     ],
                     const SizedBox(height: 12),
@@ -600,8 +677,10 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
     }
 
     if (order.status == 'DRIVER_ARRIVING') {
+      final canStartRide = _canStartRide(order);
       return FilledButton(
-        onPressed: _busy ? null : () => _updateStatus('IN_PROGRESS'),
+        onPressed:
+            _busy || !canStartRide ? null : () => _updateStatus('IN_PROGRESS'),
         child: Text(_busy ? i18n.t('loading') : i18n.t('start_ride')),
       );
     }

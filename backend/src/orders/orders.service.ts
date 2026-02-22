@@ -9,6 +9,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { AuthUser } from '../auth/types/auth-user.type';
 import { UserRole } from '../auth/user-role.enum';
+import { RedisGeoService } from '../geo/redis-geo.service';
 import { MatchmakingService } from '../matchmaking/matchmaking.service';
 import { PricingService } from '../pricing/pricing.service';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -27,12 +28,14 @@ export class OrdersService {
     OrderStatus.DRIVER_ARRIVING,
     OrderStatus.IN_PROGRESS,
   ];
+  private static readonly PICKUP_ARRIVAL_RADIUS_METERS = 120;
 
   constructor(
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
     private readonly pricingService: PricingService,
     private readonly matchmakingService: MatchmakingService,
+    private readonly redisGeoService: RedisGeoService,
     private readonly orderEventsGateway: OrderEventsGateway,
   ) {}
 
@@ -154,6 +157,10 @@ export class OrdersService {
       throw new BadRequestException('DRIVER_ASSIGNED state requires driverId');
     }
 
+    if (nextStatus === OrderStatus.IN_PROGRESS) {
+      await this.assertDriverReachedPickup(order);
+    }
+
     order.status = nextStatus;
     const saved = await this.orderRepository.save(order);
 
@@ -264,5 +271,49 @@ export class OrdersService {
     throw new ConflictException(
       `Passenger already has active order: ${existing.id} (${existing.status})`,
     );
+  }
+
+  private async assertDriverReachedPickup(order: Order): Promise<void> {
+    if (!order.driverId) {
+      throw new BadRequestException('Cannot start ride without assigned driver');
+    }
+
+    const driverLocation = await this.redisGeoService.getDriverLocation(order.driverId);
+    if (!driverLocation) {
+      throw new BadRequestException('Driver location is unknown. Update location before starting ride');
+    }
+
+    const distanceMeters = this.distanceMeters(
+      driverLocation.latitude,
+      driverLocation.longitude,
+      order.pickupLatitude,
+      order.pickupLongitude,
+    );
+
+    if (distanceMeters > OrdersService.PICKUP_ARRIVAL_RADIUS_METERS) {
+      throw new BadRequestException(
+        `Driver is too far from pickup point (${Math.round(distanceMeters)}m > ${OrdersService.PICKUP_ARRIVAL_RADIUS_METERS}m)`,
+      );
+    }
+  }
+
+  private distanceMeters(
+    latitude1: number,
+    longitude1: number,
+    latitude2: number,
+    longitude2: number,
+  ): number {
+    const toRad = (value: number) => (value * Math.PI) / 180;
+    const earthRadiusMeters = 6371000;
+    const dLat = toRad(latitude2 - latitude1);
+    const dLon = toRad(longitude2 - longitude1);
+    const lat1Rad = toRad(latitude1);
+    const lat2Rad = toRad(latitude2);
+
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1Rad) * Math.cos(lat2Rad) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return earthRadiusMeters * c;
   }
 }

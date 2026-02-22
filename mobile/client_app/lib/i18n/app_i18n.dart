@@ -112,6 +112,11 @@ class AppI18n {
       'orders_list_empty': 'Тапсырыстар әлі жоқ.',
       'status': 'Күйі: {value}',
       'final_price_label': 'Соңғы баға: {value} KZT',
+      'distance_to_pickup': 'Алу нүктесіне дейін: {meters} м',
+      'pickup_reached': 'Алу нүктесіне жеттіңіз',
+      'pickup_distance_unknown': 'Pickup қашықтығы анықталмады (GPS керек)',
+      'pickup_arrival_required':
+          'Сапарды бастау үшін алдымен алу нүктесіне жетіңіз',
       'driver_id': 'Driver ID: {value}',
       'loading': 'Жүктелуде...',
       'refresh_orders': 'Тапсырысты жаңарту',
@@ -230,6 +235,11 @@ class AppI18n {
       'orders_list_empty': 'Заказов пока нет.',
       'status': 'Статус: {value}',
       'final_price_label': 'Итоговая цена: {value} KZT',
+      'distance_to_pickup': 'До точки подачи: {meters} м',
+      'pickup_reached': 'Вы прибыли в точку подачи',
+      'pickup_distance_unknown': 'Расстояние до точки подачи неизвестно (нужен GPS)',
+      'pickup_arrival_required':
+          'Чтобы начать поездку, сначала прибудьте в точку подачи',
       'driver_id': 'Driver ID: {value}',
       'loading': 'Загрузка...',
       'refresh_orders': 'Обновить заказы',

@@ -9,6 +9,11 @@ export interface NearbyDriverLocation {
   distanceKm: number;
 }
 
+export interface DriverGeoPoint {
+  latitude: number;
+  longitude: number;
+}
+
 @Injectable()
 export class RedisGeoService implements OnModuleDestroy {
   private readonly logger = new Logger(RedisGeoService.name);
@@ -54,6 +59,29 @@ export class RedisGeoService implements OnModuleDestroy {
 
   async updateDriverLocation(driverId: string, latitude: number, longitude: number): Promise<void> {
     await this.redis.geoadd(this.driversKey, longitude, latitude, driverId);
+  }
+
+  async getDriverLocation(driverId: string): Promise<DriverGeoPoint | null> {
+    const raw = (await this.redis.call('GEOPOS', this.driversKey, driverId)) as unknown;
+    if (!Array.isArray(raw) || raw.length === 0) {
+      return null;
+    }
+
+    const first = raw[0];
+    if (!Array.isArray(first) || first.length < 2) {
+      return null;
+    }
+
+    const lon = Number(first[0]);
+    const lat = Number(first[1]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      return null;
+    }
+
+    return {
+      latitude: lat,
+      longitude: lon,
+    };
   }
 
   async findNearbyAvailableDrivers(
