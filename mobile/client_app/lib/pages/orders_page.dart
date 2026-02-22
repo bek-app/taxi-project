@@ -95,6 +95,7 @@ class _OrdersPageState extends State<OrdersPage> {
     switch (status) {
       case 'DRIVER_ASSIGNED':
       case 'DRIVER_ARRIVING':
+      case 'DRIVER_ARRIVED':
       case 'IN_PROGRESS':
         return UiKitColors.success;
       case 'COMPLETED':
@@ -112,6 +113,8 @@ class _OrdersPageState extends State<OrdersPage> {
         return Icons.notifications_active_rounded;
       case 'DRIVER_ARRIVING':
         return Icons.directions_car_filled_rounded;
+      case 'DRIVER_ARRIVED':
+        return Icons.location_on_rounded;
       case 'IN_PROGRESS':
         return Icons.route_rounded;
       case 'COMPLETED':

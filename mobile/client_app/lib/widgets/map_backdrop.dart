@@ -21,6 +21,7 @@ class MapBackdrop extends StatefulWidget {
     this.onPickupTap,
     this.onCurrentLocationTap,
     this.pickupDraggable = false,
+    this.showCurrentLocationMarker = true,
     super.key,
   });
 
@@ -39,6 +40,7 @@ class MapBackdrop extends StatefulWidget {
   final ValueChanged<LatLng>? onPickupTap;
   final ValueChanged<LatLng>? onCurrentLocationTap;
   final bool pickupDraggable;
+  final bool showCurrentLocationMarker;
 
   @override
   State<MapBackdrop> createState() => _MapBackdropState();
@@ -211,7 +213,7 @@ class _MapBackdropState extends State<MapBackdrop>
     ];
 
     final markers = <Marker>[
-      if (widget.currentLocation != null)
+      if (widget.currentLocation != null && widget.showCurrentLocationMarker)
         Marker(
           point: widget.currentLocation!,
           width: 42,

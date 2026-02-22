@@ -131,7 +131,9 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
     }
 
     final status = order.status;
-    if (status == 'DRIVER_ASSIGNED' || status == 'DRIVER_ARRIVING') {
+    if (status == 'DRIVER_ASSIGNED' ||
+        status == 'DRIVER_ARRIVING' ||
+        status == 'DRIVER_ARRIVED') {
       final pickup = _pickupPoint;
       return LatLng(pickup.latitude + 0.0035, pickup.longitude + 0.0045);
     }
@@ -835,7 +837,9 @@ class _ClientFlowPageState extends State<ClientFlowPage> {
       return;
     }
 
-    if (order.status == 'DRIVER_ARRIVING' || order.status == 'IN_PROGRESS') {
+    if (order.status == 'DRIVER_ARRIVING' ||
+        order.status == 'DRIVER_ARRIVED' ||
+        order.status == 'IN_PROGRESS') {
       _startOrderPolling();
       setState(() => _step = ClientFlowStep.tracking);
       return;

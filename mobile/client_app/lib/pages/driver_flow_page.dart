@@ -79,6 +79,31 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
     return LatLng(order.dropoffLatitude!, order.dropoffLongitude!);
   }
 
+  List<LatLng>? get _driverRoutePolylinePoints {
+    final order = _activeOrder;
+    if (order == null || !_isPanelVisibleOrder(order)) {
+      return null;
+    }
+
+    final driver = _currentLatLng;
+    final pickup = _pickupPoint;
+    final dropoff = _dropoffPoint;
+
+    if ((order.status == 'DRIVER_ASSIGNED' ||
+            order.status == 'DRIVER_ARRIVING' ||
+            order.status == 'DRIVER_ARRIVED') &&
+        driver != null &&
+        pickup != null) {
+      return [driver, pickup];
+    }
+
+    if (order.status == 'IN_PROGRESS' && driver != null && dropoff != null) {
+      return [driver, dropoff];
+    }
+
+    return null;
+  }
+
   double? _pickupDistanceMeters(BackendOrder order) {
     final current = _currentPosition;
     final pickupLat = order.pickupLatitude;
@@ -427,6 +452,7 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
   bool _isPanelVisibleStatus(String status) {
     return status == 'DRIVER_ASSIGNED' ||
         status == 'DRIVER_ARRIVING' ||
+        status == 'DRIVER_ARRIVED' ||
         status == 'IN_PROGRESS';
   }
 
@@ -561,6 +587,8 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
               pickupPoint: _pickupPoint,
               dropoffPoint: _dropoffPoint,
               driverPoint: _currentLatLng,
+              routePolylinePoints: _driverRoutePolylinePoints,
+              showCurrentLocationMarker: false,
             ),
           ),
           _buildMapActionsOverlay(i18n),
@@ -635,7 +663,8 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
                           {'value': panelOrder.finalPrice.toStringAsFixed(0)},
                         ),
                       ),
-                      if (panelOrder.status == 'DRIVER_ARRIVING') ...[
+                      if (panelOrder.status == 'DRIVER_ARRIVING' ||
+                          panelOrder.status == 'DRIVER_ARRIVED') ...[
                         const SizedBox(height: 4),
                         Builder(
                           builder: (context) {
@@ -652,7 +681,8 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
                             }
 
                             final reached =
-                                distance <= _pickupArrivalRadiusMeters;
+                                panelOrder.status == 'DRIVER_ARRIVED' ||
+                                    distance <= _pickupArrivalRadiusMeters;
                             return Text(
                               reached
                                   ? i18n.t('pickup_reached')
@@ -749,10 +779,18 @@ class _DriverFlowPageState extends State<DriverFlowPage> {
     }
 
     if (order.status == 'DRIVER_ARRIVING') {
-      final canStartRide = _canStartRide(order);
+      final canMarkArrived = _canStartRide(order);
       return FilledButton(
-        onPressed:
-            _busy || !canStartRide ? null : () => _updateStatus('IN_PROGRESS'),
+        onPressed: _busy || !canMarkArrived
+            ? null
+            : () => _updateStatus('DRIVER_ARRIVED'),
+        child: Text(_busy ? i18n.t('loading') : i18n.t('mark_arrived')),
+      );
+    }
+
+    if (order.status == 'DRIVER_ARRIVED') {
+      return FilledButton(
+        onPressed: _busy ? null : () => _updateStatus('IN_PROGRESS'),
         child: Text(_busy ? i18n.t('loading') : i18n.t('start_ride')),
       );
     }

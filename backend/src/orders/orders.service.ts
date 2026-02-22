@@ -26,6 +26,7 @@ export class OrdersService {
     OrderStatus.SEARCHING_DRIVER,
     OrderStatus.DRIVER_ASSIGNED,
     OrderStatus.DRIVER_ARRIVING,
+    OrderStatus.DRIVER_ARRIVED,
     OrderStatus.IN_PROGRESS,
   ];
   private static readonly PICKUP_ARRIVAL_RADIUS_METERS = 120;
@@ -167,7 +168,7 @@ export class OrdersService {
       throw new BadRequestException('DRIVER_ASSIGNED state requires driverId');
     }
 
-    if (nextStatus === OrderStatus.IN_PROGRESS) {
+    if (nextStatus === OrderStatus.DRIVER_ARRIVED) {
       await this.assertDriverReachedPickup(order);
     }
 
@@ -238,6 +239,7 @@ export class OrdersService {
 
     const driverOnlyStatuses = new Set<OrderStatus>([
       OrderStatus.DRIVER_ARRIVING,
+      OrderStatus.DRIVER_ARRIVED,
       OrderStatus.IN_PROGRESS,
       OrderStatus.COMPLETED,
     ]);

@@ -146,6 +146,7 @@ class AppI18n {
       'loading': 'Жүктелуде...',
       'refresh_orders': 'Тапсырысты жаңарту',
       'accept_ride': 'Сапарды қабылдау',
+      'mark_arrived': 'Келдім',
       'set_arriving': 'Жолда деп белгілеу',
       'start_ride': 'Сапарды бастау',
       'complete_ride': 'Сапарды аяқтау',
@@ -154,6 +155,7 @@ class AppI18n {
       'status_SEARCHING_DRIVER': 'Жүргізуші ізделуде',
       'status_DRIVER_ASSIGNED': 'Жүргізуші тағайындалды',
       'status_DRIVER_ARRIVING': 'Жүргізуші келе жатыр',
+      'status_DRIVER_ARRIVED': 'Жүргізуші келді',
       'status_IN_PROGRESS': 'Сапар жүріп жатыр',
       'status_COMPLETED': 'Аяқталды',
       'status_CANCELED': 'Бас тартылды',
@@ -295,6 +297,7 @@ class AppI18n {
       'loading': 'Загрузка...',
       'refresh_orders': 'Обновить заказы',
       'accept_ride': 'Принять заказ',
+      'mark_arrived': 'Прибыл',
       'set_arriving': 'Отметить: подъезжаю',
       'start_ride': 'Начать поездку',
       'complete_ride': 'Завершить заказ',
@@ -303,6 +306,7 @@ class AppI18n {
       'status_SEARCHING_DRIVER': 'Поиск водителя',
       'status_DRIVER_ASSIGNED': 'Водитель назначен',
       'status_DRIVER_ARRIVING': 'Водитель подъезжает',
+      'status_DRIVER_ARRIVED': 'Водитель прибыл',
       'status_IN_PROGRESS': 'Поездка идет',
       'status_COMPLETED': 'Завершено',
       'status_CANCELED': 'Отменено',
@@ -338,6 +342,8 @@ String localizedOrderStatus(AppLang lang, String status) {
       return i18n.t('status_DRIVER_ASSIGNED');
     case 'DRIVER_ARRIVING':
       return i18n.t('status_DRIVER_ARRIVING');
+    case 'DRIVER_ARRIVED':
+      return i18n.t('status_DRIVER_ARRIVED');
     case 'IN_PROGRESS':
       return i18n.t('status_IN_PROGRESS');
     case 'COMPLETED':
